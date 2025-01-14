@@ -26,3 +26,6 @@ class Auth:
     def join(self, user_id: int, group_id: int) -> None:
         """Join a user and a group."""
 
+    def can(self, user: UserMixin, action: str, context: Any='global') -> bool:
+        """Check whether the `user` can perform `action` on a `context`."""
+        return True
