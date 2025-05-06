@@ -2,7 +2,6 @@ from typing import Any
 
 from sqlalchemy.orm import DeclarativeBase, DeclarativeMeta, Session
 
-
 from .models import create_from_mixin, UserMixin, GroupMixin, RoleMixin, define_relation_tables, PermissionMixin
 
 
@@ -14,7 +13,7 @@ class Auth:
                  group_class:DeclarativeBase=None,
                  role_class:DeclarativeBase=None,
                  permission_class:DeclarativeBase=None,
-                 context: 'quasar_context.base.QuasarContextManager' = None) -> None:
+                 context: 'jsalchemy_api.context.manager.ContextManager' = None) -> None:
         self.User = user_class or create_from_mixin(UserMixin, model_base)  # pylint: disable=invalid-name
         self.Group = group_class or create_from_mixin(GroupMixin, model_base)  # pylint: disable=invalid-name
         self.Role = role_class or create_from_mixin(RoleMixin, model_base)  # pylint: disable=invalid-name

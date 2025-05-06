@@ -1,8 +1,9 @@
 # pylint: disable=too-few-public-methods
+from functools import lru_cache
 from typing import List
 
-from sqlalchemy import String, ForeignKey, Column, Table, Integer
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, ForeignKey, Column, Table, Integer, Boolean
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, InstrumentedAttribute
 from sqlalchemy.orm import relationship
 
 class Base:
@@ -22,6 +23,9 @@ class NamedMixin:
 
 class UserMixin(Base):
     """Minimalistic user model class."""
+    username: Mapped[str] = mapped_column(unique=True, nullable=False)
+    password: Mapped[str]
+    _exported_fields = []
 
     def join(self, group: "GroupMixin"):
         """Make the user to join the `group`."""
@@ -31,6 +35,12 @@ class UserMixin(Base):
         """Make the user to leave the `group`."""
         group.members.remove(self)
 
+    def to_dict(self) -> dict:
+        """Please override this method with something in line with the real class."""
+        if not self._exported_fields:
+            self._exported_fields.extend([name for name in dir(self.__class__)
+                                          if name != 'password' and isinstance(getattr(self.__class__, name), InstrumentedAttribute)])
+        return {name: getattr(self, name) for name in self._exported_fields}
 
 class GroupMixin(NamedMixin, Base):
     """Minimalistic Group model class."""
@@ -43,12 +53,9 @@ class GroupMixin(NamedMixin, Base):
 class RoleMixin(NamedMixin, Base):
     """Minimalistic Role model class."""
 
-
-
 class PermissionMixin(NamedMixin, Base):
     """Minimalistic Permission model class."""
-
-    is_global: Mapped[bool] = mapped_column(default=False, nullable=True, server_default=False)
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False, primary_key=True, nullable=False)
 
 
 

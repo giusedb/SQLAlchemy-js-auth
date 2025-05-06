@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "quasar-authorization"
+name = "sqlalchemy-js-authorization"
 version = "0.1.0"
 description = ""
-authors = ["Your Name <you@example.com>"]
+authors = ["Giuseppe Di Bona <giusedb@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = "^3.11"
 sqlalchemy = "^2.0.36"
 
 

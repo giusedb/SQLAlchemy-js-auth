@@ -3,7 +3,7 @@
 # pylint: disable=missing-class-docstring
 # pylint: disable=too-few-public-methods
 from sqlalchemy.orm import DeclarativeBase, Session
-from quasar_authorization.auth import Auth
+from jsalchemy_authorization.auth import Auth
 
 
 def test_create_tables_basic(db_engine):

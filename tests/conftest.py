@@ -23,7 +23,7 @@ def session(db_engine):
 @fixture()
 def auth(db_engine):
     """Create an `Auth` instance and builds the database."""
-    from quasar_authorization.auth import Auth
+    from jsalchemy_authorization.auth import Auth
 
     class MyBase(DeclarativeBase):
         """Base declarative class to use for testing."""
@@ -35,7 +35,7 @@ def auth(db_engine):
     return auth
 
 @fixture()
-def user_auth(session: Session, auth: "quasar_authorization.auth.Auth"):
+def user_auth(session: Session, auth: "jsalchemy_authorization.auth.Auth"):
     """Create a simple user scenario."""
     for username, password in [['foo', 'foo'], ['bar', 'bar'], ['baz', 'baz']]:
         session.add(auth.User(username=username, password=password))
