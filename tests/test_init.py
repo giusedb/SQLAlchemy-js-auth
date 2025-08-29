@@ -3,7 +3,7 @@
 # pylint: disable=missing-class-docstring
 # pylint: disable=too-few-public-methods
 from sqlalchemy.orm import DeclarativeBase, Session
-from jsalchemy_authorization.auth import Auth
+from src.jsalchemy_auth.auth import Auth
 
 
 def test_create_tables_basic(db_engine):
@@ -54,3 +54,4 @@ def test_users(auth: Auth, session: Session, user_auth):  # pylint: disable=unus
 
     assert groups['admin'] in users['foo'].membership, 'Group "Admin" added to user'
     assert roles['admin'] in users['foo'].membership, 'Group "Admin" added to user'
+
