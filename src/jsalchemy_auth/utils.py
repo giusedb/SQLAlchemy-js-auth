@@ -10,6 +10,8 @@ class Context(NamedTuple):
 
 def to_context(object: DeclarativeBase) -> Context:
     """Convert a DeclarativeBase object to a Context."""
+    if isinstance(object, Context):
+        return object
     return Context(object.__tablename__, object.id)
 
 async def to_object(context: Context) -> DeclarativeBase:

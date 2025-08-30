@@ -1,5 +1,14 @@
+from itertools import zip_longest, groupby
+from operator import itemgetter
+from tokenize import group
+from typing import List, Dict
+
+from essentials.folders import split_path
+from openapidocs.mk.common import is_reference
+from sqlalchemy import Column, select
+
 from jsalchemy_web_context import redis
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY
 from sqlalchemy.orm.collections import InstrumentedList, InstrumentedDict
 
 from .auth import Context
@@ -11,6 +20,28 @@ from marshal import dumps, loads
 
 TABLE_CLASS = None
 NAME_TABLE = None
+CLASS_STRUCTURE = None
+
+def setup(Base):
+    """Setup the table resolver dictionaries."""
+    global TABLE_CLASS, NAME_TABLE, CLASS_STRUCTURE
+    TABLE_CLASS = {m.tables[0].name: m.class_ for m in Base.__mapper__.registry.mappers}
+    NAME_TABLE = dict(Base.metadata.tables)
+    CLASS_STRUCTURE = {m.class_.__tablename__: dict(m.class_.__mapper__.attrs) for m in Base.__mapper__.registry.mappers}
+
+def common_path(paths: List[List[str]]) -> Dict[str, Dict | None]:
+    """Identifies the common path from a list of list of string."""
+    if not paths or not any(paths):
+        return None
+    grouped = {key: common_path(tuple(x[1:] for x in value))
+               for key, value in groupby(filter(bool, paths), itemgetter(0))}
+    for k, v in tuple(grouped.items()):
+        if v and len(v.items()) == 1:
+            grouped['.'.join((k, next(iter(v))))] = next(iter(v.values()))
+            del grouped[k]
+    return grouped
+
+
 async def resolve_attribute(context: Context, attribute: str):
     """returns the value of `attribute` for the specified `context`."""
     sqla_attribute = CLASS_STRUCTURE[context.table][attribute]
@@ -38,6 +69,12 @@ async def resolve_attribute(context: Context, attribute: str):
             if item:
                 return Context(target_table, item)
     return None
+
+def treefy_paths(*paths: List[str]):
+    """Identifies the common path between the paths."""
+    split_path = [tuple(path.split(".")) if type(path) is str else path for path in paths]
+    return common_path(sorted(split_path))
+
 
 async def to_object(context: Context):
     """Convert a Context to a DeclarativeBase object."""
@@ -97,3 +134,10 @@ async def traverse(object: DeclarativeBase, path: str, start:int =0):
         else:
             if start <= n:
                 yield current
+
+async def tree_traverse(object: DeclarativeBase, *path: str, start:int =0):
+    """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
+    for path, subpath in path.items():
+        async for item in traverse(object, path, start=start - 1):
+            yield item
+
