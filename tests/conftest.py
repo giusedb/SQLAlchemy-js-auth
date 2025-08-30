@@ -3,7 +3,7 @@
 # pylint: disable=import-outside-toplevel
 import pytest_asyncio
 from pytest import fixture
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, String
+from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import Session, relationship, MappedColumn, DeclarativeBase, mapped_column, Mapped
 from jsalchemy_web_context import session, db, request
@@ -21,6 +21,7 @@ def sync_db_engine():
     engine = create_engine('sqlite:///:memory:')
     return engine
 
+
 @fixture()
 def db_engine():
     """Create a test SQLAlchemy database engine."""
@@ -30,7 +31,7 @@ def db_engine():
 @fixture()
 def session(db_engine):
     """Create a SQLAlchemy database session."""
-    return async_sessionmaker(bind=db_engine)
+    return async_sessionmaker(bind=db_engine, expire_on_commit=False)
 
 @fixture
 def open_session(session):
@@ -75,28 +76,28 @@ async def auth(db_engine, session, Base):
     return auth
 
 @pytest_asyncio.fixture
-async def user_auth(session: Session, auth: "jsalchemy_auth.auth.Auth"):
+async def user_auth(auth: "jsalchemy_auth.auth.Auth", context):
     """Create a simple user scenario."""
 
-    for name in ['foo', 'bar', 'baz']:
-        session.add(auth.user_model(name=name))
+    async with context():
+        for name in ['foo', 'bar', 'baz']:
+            db.add(auth.user_model(name=name))
+        for name in ['admin', 'superadmin', 'local users', 'users']:
+            db.add(auth.group_model(name=name))
+        for role in ['admin', 'superadmin', 'local users', 'users']:
+            db.add(auth.role_model(name=role))
 
-    for name in ['admin', 'superadmin', 'local users', 'users']:
-        session.add(auth.user_group_model(name=name))
+        await db.commit()
 
-    for role in ['admin', 'superadmin']:
-        session.add(auth.role_model(name=role))
+        users = {user.name: user for user in (await db.execute(select(auth.user_model))).scalars()}
+        groups = {group.name: group for group in (await db.execute(select(auth.group_model))).scalars()}
+        roles = {role.name: role for role in (await db.execute(select(auth.role_model))).scalars()}
 
-    session.commit()
+        (await users['foo'].awaitable_attrs.memberships).append(groups['admin'])
+        (await users['bar'].awaitable_attrs.memberships).append(groups['superadmin'])
+        for name, group in groups.items():
+            (await group.awaitable_attrs.granted).append(roles[name])
 
-    users = { user.username: user for user in session.query(auth.user_model) }
-    groups = { group.name: group for group in session.query(auth.user_group_model) }
-    roles = { role.name: role for role in session.query(auth.role_model) }
-
-    users['foo'].groups.append(groups['admin'])
-    users['bar'].groups.append(groups['superadmin'])
-
-    await session.commit()
     return users, groups, roles
 
 

@@ -58,7 +58,7 @@ async def test_contextual_roles(context, auth, users, roles, spatial):
 @pytest.mark.asyncio
 async def test_grants(spatial, context, auth, roles, users):
     from jsalchemy_auth.auth import PermissionGrantError
-    from jsalchemy_auth.auth import rolegrant_table
+    from jsalchemy_auth.auth import rolegrant
     Country, Department, City = spatial
 
     async with context() as ctx:
@@ -72,7 +72,7 @@ async def test_grants(spatial, context, auth, roles, users):
         with pytest.raises(PermissionGrantError):
             await auth.grant(alice, 'dontexists', await db.get(Country, 1))
 
-        all_grants = set((await db.execute(select(rolegrant_table))).all())
+        all_grants = set((await db.execute(select(rolegrant))).all())
         assert len(all_grants) == 3
 
         role_ids = {role.name: role.id for role in (await db.execute(select(auth.role_model))).scalars().all()}
@@ -83,7 +83,7 @@ async def test_grants(spatial, context, auth, roles, users):
 @pytest.mark.asyncio
 async def test_revoke(auth, spatial, context, roles, users):
     from jsalchemy_auth.auth import PermissionGrantError
-    from jsalchemy_auth.auth import rolegrant_table
+    from jsalchemy_auth.auth import rolegrant
     Country, Department, City = spatial
 
     async with context() as ctx:
@@ -97,7 +97,7 @@ async def test_revoke(auth, spatial, context, roles, users):
         with pytest.raises(PermissionGrantError):
             await auth.grant(alice, 'dontexists', await db.get(Country, 1))
 
-        all_grants = set((await db.execute(select(rolegrant_table))).all())
+        all_grants = set((await db.execute(select(rolegrant))).all())
         assert len(all_grants) == 3
 
         role_ids = {role.name: role.id for role in (await db.execute(select(auth.role_model))).scalars().all()}
@@ -113,7 +113,7 @@ async def test_revoke(auth, spatial, context, roles, users):
         await auth.revoke(bob, 'read-only', auth._resolve_context(await db.get(Country, 1)))
         await auth.revoke(charlie, 'editor', auth._resolve_context(await db.get(Country, 1)))
 
-        all_grants = set((await db.execute(select(rolegrant_table))).all())
+        all_grants = set((await db.execute(select(rolegrant))).all())
         assert len(all_grants) == 0
 
 @pytest.mark.asyncio
