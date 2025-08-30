@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
 from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select
 
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
-from .models import role_permission_table, rolegrant_table, usergroup_user_table
+from .utils import Context, to_context, to_object
 from .models import role_permission, rolegrant, membership
 
 
@@ -17,7 +17,6 @@ class PermissionGrantError(Exception):
     """Raised when a permission cannot be granted to a table in the context."""
     pass
 
-Context = namedtuple('Context', ['table', 'id'])
 
 class Auth:
     def __init__(
@@ -151,7 +150,7 @@ class Auth:
     async def grant(self, user_group, role_name: str, context):
         """Grants a role to a UserGroup in the context of a specific database record."""
         # Validate that the role can be granted to the table used in the context
-        context_table = context.__tablename__
+        context = to_context(context)
 
         # Get the role
         role = await self._get_role(role_name)
@@ -159,9 +158,9 @@ class Auth:
             raise PermissionGrantError(f"Role {role_name} does not exist")
 
         # Check if the role's associated tables include the context table
-        if role.tables and context_table not in role.tables.split(','):
+        if role.tables and context.table not in role.tables.split(','):
             raise PermissionGrantError(
-                f"Role {role_name} cannot be granted to table {context_table}"
+                f"Role {role_name} cannot be granted to table {context.table}"
             )
 
         # Check if this grant already exists
@@ -176,11 +175,11 @@ class Auth:
 
         if not existing_grant.fetchone():
             await session.execute(
-                rolegrant_table.insert().values(
+                rolegrant.insert().values(
                     usergroup_id=user_group.id,
                     role_id=role.id,
                     context_id=context.id,
-                    context_table=context_table,
+                    context_table=context.table,
                 )
             )
 
@@ -214,7 +213,7 @@ class Auth:
         role_ids = await self._resolve_permission(permission_name)
         user_groups = await self._user_groups(user.id)
         if isinstance(context, self.base_class):
-            context = self._resolve_context(context)
+            context = to_context(context)
         roles_ids = [await self._contextual_roles(group_id, context) for group_id in user_groups ]
         valid_roles = reduce(set.union, filter(bool, roles_ids), set())
         return bool(role_ids.intersection(valid_roles))
