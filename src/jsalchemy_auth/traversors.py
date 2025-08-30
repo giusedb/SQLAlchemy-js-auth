@@ -11,6 +11,33 @@ from marshal import dumps, loads
 
 TABLE_CLASS = None
 NAME_TABLE = None
+async def resolve_attribute(context: Context, attribute: str):
+    """returns the value of `attribute` for the specified `context`."""
+    sqla_attribute = CLASS_STRUCTURE[context.table][attribute]
+    if isinstance(sqla_attribute, ColumnProperty):
+        target_field = sqla_attribute.columns[0]
+        return (await db.execute(select(target_field).where(TABLE_CLASS[context.table].id == context.id))).scalar()
+    elif isinstance(sqla_attribute, (RelationshipProperty)):
+        if sqla_attribute.direction == MANYTOMANY:
+            target_table = sqla_attribute.target.name
+            where_field = next(iter(
+                c for c in sqla_attribute.secondary.c
+                if c.foreign_keys and any(x.column.table.name == context.table for x in c.foreign_keys)))
+            where = where_field == context.id
+            return tuple(Context(target_table, row.id) for row in await db.execute(select(target_table).where(where)))
+        elif sqla_attribute.direction == ONETOMANY:
+            target_table = sqla_attribute.target.name
+            target_field = sqla_attribute.target.c.id
+            where = sqla_attribute.primaryjoin.right == context.id
+            return tuple(Context(target_table, id) for id in (await db.execute(select(target_field).where(where))).scalars())
+        else:
+            target_table = sqla_attribute.target.name
+            target_field = sqla_attribute.primaryjoin.right
+            where = sqla_attribute.parent.tables[0].c.id == context.id
+            item = (await db.execute(select(target_field).where(where))).scalar()
+            if item:
+                return Context(target_table, item)
+    return None
 
 async def to_object(context: Context):
     """Convert a Context to a DeclarativeBase object."""
@@ -18,41 +45,35 @@ async def to_object(context: Context):
         return context
     return await db.get(TABLE_CLASS[context.table], context.id)
 
-def setup(Base):
-    """Setup the table resolver dictionaries."""
-    global TABLE_CLASS, NAME_TABLE
-    TABLE_CLASS = {m.tables[0].name: m.class_ for m in Base.__mapper__.registry.mappers}
-    NAME_TABLE = dict(Base.metadata.tables)
 
 async def _referent(object: DeclarativeBase | Context, attribute: str) -> Context:
     """Get the referent of an attribute."""
     context = object if isinstance(object, Context) else to_context(object)
     key = f'traverse:{context.table}.{attribute}'
+    column = CLASS_STRUCTURE[context.table][attribute]
+    is_reference = isinstance(column, RelationshipProperty)
+    is_many = is_reference and column.direction in (MANYTOMANY, ONETOMANY)
     blob = await redis.hget(key, context.id)
     if blob:
-        context = loads(blob)
-        target_context = Context(*context) if type(context) is tuple else context
+        target = loads(blob)
+        if is_many:
+            target_table = column.target.name
+            target = tuple(Context(target_table, id) for id in target)
+        elif is_reference:
+            target_table = column.target.name
+            target = Context(target_table, target)
     else:
         # find the context
-        object = await to_object(context)
-        if not object:
-            await redis.hset(f'traverse:{context.table}.{attribute}', context.id, dumps(None))
-            return None
-        # TODO it can be optimize by minimizing the query by getting the individual fields
-        target = await getattr(object.awaitable_attrs, attribute, None)
+        target = await resolve_attribute(context, attribute)
         if not target:
-            return None
-        if isinstance(target, (list, tuple, set, InstrumentedList, InstrumentedDict)):
-            target_context = tuple(map(to_context, target))
-            target_blob = tuple(map(tuple, target_context))
-        elif isinstance(target, DeclarativeBase):
-            target_context = to_context(target)
-            target_blob = tuple(target_context)
+            await redis.hset(f'traverse:{context.table}.{attribute}', context.id, dumps(None))
+            return False, None
+        if is_many:
+            target_blob = tuple(x.id for x in target)
         else:
-            target_context = target
-            target_blob = target
+            target_blob = target.id if type(target) is Context else target
         await redis.hset(key, context.id, dumps(target_blob))
-    return target_context
+    return is_many, target
 
 async def traverse(object: DeclarativeBase, path: str, start:int =0):
     """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
@@ -62,10 +83,10 @@ async def traverse(object: DeclarativeBase, path: str, start:int =0):
     current = object
     split_path = tuple(path.split("."))
     for n, p in enumerate(split_path, 1):
-        current = await getattr(current.awaitable_attrs, p) # _referent(current, p)
+        many, current = await _referent(current, p)
         if current is None:
             raise StopAsyncIteration
-        if isinstance(current, (InstrumentedList, InstrumentedDict)) or type(current) is tuple:
+        if many:
             for curr in current:
                 if start <= n:
                     yield curr
