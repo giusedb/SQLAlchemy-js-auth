@@ -25,22 +25,22 @@ class PermissionMixin:
     is_global: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-role_permission_table = rolegrant_table = usergroup_user_table = None
+role_permission = rolegrant = membership = None
 
 
 def define_tables(Base, User: UserMixin, UserGroup: UserGroupMixin, Role: RoleMixin, Permission: PermissionMixin):
-    global role_permission_table, rolegrant_table, usergroup_user_table
+    global role_permission, rolegrant, membership
 
     # Association tables
-    role_permission_table = Table(
-        'role_permission',
+    role_permission = Table(
+        'roles_permissions',
         Base.metadata,
         Column('role_id', Integer, ForeignKey(f'{Role.__tablename__}.id')),
         Column('permission_id', Integer, ForeignKey(f'{Permission.__tablename__}.id'))
     )
 
-    rolegrant_table = Table(
-        'rolegrant',
+    rolegrant = Table(
+        'rolegrants',
         Base.metadata,
         Column('usergroup_id', Integer, ForeignKey(f'{UserGroup.__tablename__}.id')),
         Column('role_id', Integer, ForeignKey(f'{Role.__tablename__}.id')),
@@ -48,15 +48,15 @@ def define_tables(Base, User: UserMixin, UserGroup: UserGroupMixin, Role: RoleMi
         Column('context_table', String),
     )
 
-    usergroup_user_table = Table(
-        'usergroup_user',
+    membership = Table(
+        'memberships',
         Base.metadata,
         Column('usergroup_id', Integer, ForeignKey(f'{UserGroup.__tablename__}.id')),
         Column('user_id', Integer, ForeignKey(f'{User.__tablename__}.id'))
     )
 
-    UserGroup.members = relationship(User, secondary=usergroup_user_table, backref='memberships')
-    UserGroup.granted = relationship(Role, secondary=rolegrant_table, backref='grants')
-    Role.permissions = relationship(Permission, secondary=role_permission_table, backref='roles')
+    UserGroup.members = relationship(User, secondary=membership, backref='memberships')
+    UserGroup.granted = relationship(Role, secondary=rolegrant, backref='grants')
+    Role.permissions = relationship(Permission, secondary=role_permission, backref='roles')
 
-    return role_permission_table, rolegrant_table, usergroup_user_table
+    return role_permission, rolegrant, membership

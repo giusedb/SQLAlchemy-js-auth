@@ -10,6 +10,8 @@ from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, sele
 
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
 from .models import role_permission_table, rolegrant_table, usergroup_user_table
+from .models import role_permission, rolegrant, membership
+
 
 class PermissionGrantError(Exception):
     """Raised when a permission cannot be granted to a table in the context."""
@@ -39,7 +41,7 @@ class Auth:
 
     def _define_tables(self, Base: DeclarativeBase):
         """Create all database tables for the models."""
-        global usergroup_user_table, rolegrant_table, role_permission_table
+        global membership, rolegrant, role_permission
         from jsalchemy_auth.models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin
         for model, mixin in [('user_model', UserMixin), ('group_model', UserGroupMixin),
                              ('role_model', RoleMixin), ('permission_model', PermissionMixin)]:
@@ -50,18 +52,14 @@ class Auth:
                 setattr(self, model, type(class_name, (mixin, Base), {'__tablename__': class_name.lower() + 's'}))
 
         # Create all tables in the database
-        role_permission_table, rolegrant_table, usergroup_user_table = define_tables(
+        role_permission, rolegrant, membership = define_tables(
             Base, self.user_model, self.group_model, self.role_model, self.permission_model)
-
-    def _resolve_context(self, context: DeclarativeBase) -> Context:
-        """Resolve the context to a table name."""
-        return Context(context.__tablename__, context.id)
 
     async def _user_groups(self, user_id: int) -> List[int]:
         """Get the user groups for a user."""
         result = await session.execute(
-            usergroup_user_table.select().where(
-                (usergroup_user_table.c.user_id == user_id)
+            membership.select().where(
+                (membership.c.user_id == user_id)
             )
         )
         return {row.usergroup_id for row in result.fetchall()}
@@ -69,17 +67,17 @@ class Auth:
     async def _contextual_roles(self, group_id: int, context: Context) -> List[int]:
         """Get the Set of Role.ids for a set of groups identified by their ids."""
         result = await session.execute(
-            rolegrant_table.select().where(
-                (rolegrant_table.c.usergroup_id == group_id) &
-                (rolegrant_table.c.context_id == context.id) &
-                (rolegrant_table.c.context_table == context.table)
+            rolegrant.select().where(
+                (rolegrant.c.usergroup_id == group_id) &
+                (rolegrant.c.context_id == context.id) &
+                (rolegrant.c.context_table == context.table)
             )
         )
         return {row.role_id for row in result.fetchall()}
 
     async def _perms_to_roles(self) -> Dict[int, Set[int]]:
-        all = (await session.execute(select(role_permission_table.c.permission_id,
-                                            role_permission_table.c.role_id))).all()
+        all = (await session.execute(select(role_permission.c.permission_id,
+                                            role_permission.c.role_id))).all()
         return {p: set(map(itemgetter(1), group))
                 for p, group in groupby(sorted(all), itemgetter(0))}
 
@@ -98,8 +96,8 @@ class Auth:
     async def _global_permissions(self) -> Set[str]:
         """Find all global permissions and return their names."""
         result = await session.execute(
-            role_permission_table.select().where(
-                (role_permission_table.c.is_global == True)
+            role_permission.select().where(
+                (role_permission.c.is_global == True)
             )
         )
         return {row.permission_name for row in result.fetchall()}
@@ -114,15 +112,15 @@ class Auth:
             permission = await self._get_or_create_permission(permission_n)
             # Check if this association already exists
             existing_assoc = await session.execute(
-                role_permission_table.select().where(
-                    (role_permission_table.c.role_id == role.id) &
-                    (role_permission_table.c.permission_id == permission.id)
+                role_permission.select().where(
+                    (role_permission.c.role_id == role.id) &
+                    (role_permission.c.permission_id == permission.id)
                 )
             )
 
             if not existing_assoc.fetchone():
                 await session.execute(
-                    role_permission_table.insert().values(
+                    role_permission.insert().values(
                         role_id=role.id,
                         permission_id=permission.id
                     )
@@ -132,8 +130,8 @@ class Auth:
         """Removes a permission from a role."""
         # Find the permission
         permission_ids = await session.execute(
-            role_permission_table.select(role_permission_table.c.permission_id).where(
-                (role_permission_table.c.permission_name.in_(pemrission_names))
+            role_permission.select(role_permission.c.permission_id).where(
+                (role_permission.c.permission_name.in_(pemrission_names))
             )
         ).scalars()
 
@@ -144,9 +142,9 @@ class Auth:
 
         # Remove the association
         await session.execute(
-            role_permission_table.delete().where(
-                (role_permission_table.c.role_id == role.id) &
-                (role_permission_table.c.permission_id in permission_ids)
+            role_permission.delete().where(
+                (role_permission.c.role_id == role.id) &
+                (role_permission.c.permission_id in permission_ids)
             )
         )
 
@@ -168,11 +166,11 @@ class Auth:
 
         # Check if this grant already exists
         existing_grant = await session.execute(
-            rolegrant_table.select().where(
-                (rolegrant_table.c.usergroup_id == user_group.id) &
-                (rolegrant_table.c.role_id == role.id) &
-                (rolegrant_table.c.context_id == context.id) &
-                (rolegrant_table.c.context_table == context_table)
+            rolegrant.select().where(
+                (rolegrant.c.usergroup_id == user_group.id) &
+                (rolegrant.c.role_id == role.id) &
+                (rolegrant.c.context_id == context.id) &
+                (rolegrant.c.context_table == context.table)
             )
         )
 
@@ -195,11 +193,11 @@ class Auth:
 
         # Remove the grant
         await session.execute(
-            rolegrant_table.delete().where(
-                (rolegrant_table.c.usergroup_id == user_group.id) &
-                (rolegrant_table.c.role_id == role.id) &
-                (rolegrant_table.c.context_id == context.id) &
-                (rolegrant_table.c.context_table == context.table)
+            rolegrant.delete().where(
+                (rolegrant.c.usergroup_id == user_group.id) &
+                (rolegrant.c.role_id == role.id) &
+                (rolegrant.c.context_id == context.id) &
+                (rolegrant.c.context_table == context.table)
             )
         )
 
@@ -234,8 +232,8 @@ class Auth:
 
         # Check roles associated with this group for the permission
         result = await session.execute(
-            rolegrant_table.select().where(
-                (rolegrant_table.c.usergroup_id == user_group.id)
+            rolegrant.select().where(
+                (rolegrant.c.usergroup_id == user_group.id)
             )
         )
 
@@ -248,9 +246,9 @@ class Auth:
 
             # Check if this role has the permission
             perm_result = await session.execute(
-                role_permission_table.select().where(
-                    (role_permission_table.c.role_id == role.id) &
-                    (role_permission_table.c.permission_id == permission.id)
+                role_permission.select().where(
+                    (role_permission.c.role_id == role.id) &
+                    (role_permission.c.permission_id == permission.id)
                 )
             )
 
@@ -267,8 +265,8 @@ class Auth:
         for group in user_groups:
             # Check if this group has the role (in any context)
             result = await session.execute(
-                rolegrant_table.select().where(
-                    (rolegrant_table.c.usergroup_id == group.id)
+                rolegrant.select().where(
+                    (rolegrant.c.usergroup_id == group.id)
                 )
             )
 
@@ -284,8 +282,8 @@ class Auth:
         """Checks if a UserGroup has the specified role in any context."""
         # Check if this group has the role (in any context)
         result = await session.execute(
-            rolegrant_table.select().where(
-                (rolegrant_table.c.usergroup_id == user_group.id)
+            rolegrant.select().where(
+                (rolegrant.c.usergroup_id == user_group.id)
             )
         )
 
