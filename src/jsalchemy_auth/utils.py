@@ -4,8 +4,8 @@ from jsalchemy_web_context import db
 from sqlalchemy.orm import DeclarativeBase
 
 class Context(NamedTuple):
-    id: int
     table: str
+    id: int
 
 
 def to_context(object: DeclarativeBase) -> Context:

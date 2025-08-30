@@ -63,11 +63,6 @@ async def test_referent(context, spatial):
         c = await _referent(Context('city', 10000), 'departments')
         assert c is None
 
-
-
-
-
-
 @pytest.mark.asyncio
 async def test_lower_traverse_start(context, spatial):
     Country, Department, City = spatial
