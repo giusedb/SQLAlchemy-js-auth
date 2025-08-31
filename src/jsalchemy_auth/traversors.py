@@ -93,6 +93,8 @@ async def _referent(object: DeclarativeBase | Context, attribute: str) -> Contex
     blob = await redis.hget(key, context.id)
     if blob:
         target = loads(blob)
+        if target is None:
+            return False, None
         if is_many:
             target_table = column.target.name
             target = tuple(Context(target_table, id) for id in target)
@@ -122,7 +124,7 @@ async def traverse(object: DeclarativeBase, path: str, start:int =0):
     for n, p in enumerate(split_path, 1):
         many, current = await _referent(current, p)
         if current is None:
-            raise StopAsyncIteration
+            break
         if many:
             for curr in current:
                 if start <= n:
