@@ -71,23 +71,25 @@ class Auth:
         )
         return {row.usergroup_id for row in result.fetchall()}
 
-    async def _contextual_roles(self, group_id: int, context: Context) -> List[int]:
+    async def _contextual_roles(self, group_id: int, context: Context) -> Set[int]:
         """Get the Set of Role.ids for a set of groups identified by their ids."""
         result = await session.execute(
-            rolegrant.select().where(
+            select(rolegrant.c.role_id).where(
                 (rolegrant.c.usergroup_id == group_id) &
                 (rolegrant.c.context_id == context.id) &
                 (rolegrant.c.context_table == context.table)
             )
         )
-        return {row.role_id for row in result.fetchall()}
+        return set(result.scalars())
 
+    @redis_cached_function()
     async def _perms_to_roles(self) -> Dict[int, Set[int]]:
         all = (await session.execute(select(role_permission.c.permission_id,
                                             role_permission.c.role_id))).all()
         return {p: set(map(itemgetter(1), group))
                 for p, group in groupby(sorted(all), itemgetter(0))}
 
+    @redis_cached_function()
     async def _perm_name_ids(self) -> Dict[str, int]:
         """Return the full translation of permission names to ids."""
         return {row.name: row.id
@@ -100,14 +102,16 @@ class Auth:
         name_ids = await self._perm_name_ids()
         return (await self._perms_to_roles())[name_ids[permission_name]]
 
+    @redis_cached_function()
     async def _global_permissions(self) -> Set[str]:
         """Find all global permissions and return their names."""
         result = await session.execute(
-            role_permission.select().where(
-                (role_permission.c.is_global == True)
+            select(self.permission_model.name).where(
+                self.permission_model.is_global == True
             )
         )
-        return {row.permission_name for row in result.fetchall()}
+        return set(result.scalars())
+
 
     async def assign(self, role_name: str, *permission_name: List[str]):
         """Assigns a permission to a role."""
