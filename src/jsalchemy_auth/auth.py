@@ -112,6 +112,41 @@ class Auth:
         )
         return set(result.scalars())
 
+    async def _has_any_role(self, group_ids: Set[int], role_ids: Set[int]) -> bool:
+        """Check if any of the group_ids have any of the role_ids."""
+        return bool((await session.execute(
+            rolegrant.select().where(
+                (rolegrant.c.usergroup_id.in_(group_ids)) &
+                (rolegrant.c.role_id.in_(role_ids))
+            )
+        )).scalar())
+
+    @property
+    def inverted_schema(self):
+        """Return the inverted schema."""
+        return inverted_properties(self.propagation_schema)
+
+    def _explode_partial_schema(self, model_class: Type[DeclarativeBase]):
+        """Follow the schema provided and build all paths from a model class."""
+        def explore(schema: Dict[str, List[str]]):
+            for key, value in schema.items():
+                yield key
+                yield from explore(value)
+        return list(explore(self.propagation_schema))
+
+    async def set_permission_global(self, is_global: bool, *permission_name: List[str]):
+        """Set a permission to be global."""
+        existing_permissions = (await session.execute(
+            select(self.permission_model).where(
+                (self.permission_model.name.in_(permission_name))
+            )
+        )).scalars().all()
+        for permission in existing_permissions:
+            permission.is_global = is_global
+        for name in set(permission_name).difference({p.name for p in existing_permissions}):
+            session.add(self.permission_model(name=name, is_global=is_global))
+        await session.flush()
+        await self._global_permissions.discard_all()
 
     async def assign(self, role_name: str, *permission_name: List[str]):
         """Assigns a permission to a role."""
