@@ -6,6 +6,8 @@ from pytest import fixture
 from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import Session, relationship, MappedColumn, DeclarativeBase, mapped_column, Mapped
+
+from jsalchemy_auth.models import UserMixin
 from jsalchemy_web_context import session, db, request
 from fakeredis.aioredis import FakeRedis
 
@@ -59,12 +61,22 @@ def Base():
 
     return Base
 
+
+@fixture
+def User(Base):
+
+    class User(UserMixin, Base):
+        __tablename__ = "user"
+        name: Mapped[str] = mapped_column(String(150), unique=True)
+
+    return User
+
 @pytest_asyncio.fixture
 async def auth(db_engine, session, Base):
     """Create an `Auth` instance and builds the database."""
     from jsalchemy_auth import Auth
 
-    class User(Base):
+    class User(UserMixin, Base):
         __tablename__ = "user"
         name: Mapped[str] = mapped_column(String(150), unique=True)
 
@@ -139,14 +151,17 @@ async def human(Base, db_engine):
     return Job, Hobby
 
 @pytest_asyncio.fixture
-async def Person(geo, human):
+async def Person(geo, human, Base, db_engine):
     """Create the `Person` class ."""
     class Person(Base):
         __tablename__ = "person"
         name: MappedColumn[str]
-        job: MappedColumn["Job"] = relationship("Job", backref="people")
-        hobby: MappedColumn["Hobby"] = relationship("Hobby", backref="people")
-        city: MappedColumn["City"] = relationship("City", backref="people")
+        job_id: Mapped[int] = Column(Integer, ForeignKey("job.id"))
+        hobby_id: Mapped[int] = Column(Integer, ForeignKey("hobby.id"))
+        city_id: Mapped[int] = Column(Integer, ForeignKey("city.id"))
+        job: Mapped["Job"] = relationship("Job", backref="people")
+        hobby: Mapped["Hobby"] = relationship("Hobby", backref="people")
+        city: Mapped["City"] = relationship("City", backref="people")
 
     await define_tables(Base, db_engine)
     return Person
@@ -192,70 +207,87 @@ async def spatial(geo, open_session):
     await open_session.commit()
     return geo
 
-@fixture
-def jobs(human, session):
+@pytest_asyncio.fixture
+async def jobs(human, context):
     """Define a few jobjs."""
     Job, Hobby = human
 
-    session.add_all([
-        Job(name="Engineer"),
-        Job(name="Architect"),
-        Job(name="Designer"),
-        Job(name="Programmer"),
-        Job(name="Sales"),
-    ])
-    session.commit()
+    async with context():
+        db.add_all([
+            Job(name="Engineer"),
+            Job(name="Architect"),
+            Job(name="Designer"),
+            Job(name="Programmer"),
+            Job(name="Sales"),
+        ])
 
-@fixture
-def hobbies(human, session):
+@pytest_asyncio.fixture
+async def hobbies(human, context):
     """Define a few hobbies."""
     Job, Hobby = human
 
-    session.add_all([
-        Hobby(name="Soccer"),
-        Hobby(name="Football"),
-        Hobby(name="Basketball"),
-        Hobby(name="Baseball"),
-        Hobby(name="Tennis"),
-    ])
-    session.commit()
+    async with context():
+        db.add_all([
+            Hobby(name="Soccer"),
+            Hobby(name="Football"),
+            Hobby(name="Basketball"),
+            Hobby(name="Baseball"),
+            Hobby(name="Tennis"),
+        ])
 
-@fixture
-def people(Person, session):
+@pytest_asyncio.fixture
+async def people(Person, context):
     """Define a few people."""
-    session.add_all([
-        Person(name="John"),
-        Person(name="Jane"),
-        Person(name="Joe"),
-        Person(name="Jill"),
-    ])
-    session.commit()
+    async with context():
+        db.add_all([
+            Person(name="John"),
+            Person(name="Jane"),
+            Person(name="Joe"),
+            Person(name="Jill"),
+        ])
 
-@fixture
-def full_people(Person, jobs, hobbies, geo, session, define_tables):
+@pytest_asyncio.fixture
+async def full_people(Person, jobs, hobbies, geo, context, people, human):
     """Define a few people with jobs, hobbies and cities."""
 
-    john = session.query(Person).filter(Person.name == "John").one()
-    jane = session.query(Person).filter(Person.name == "Jane").one()
-    joe = session.query(Person).filter(Person.name == "Joe").one()
-    jill = session.query(Person).filter(Person.name == "Jill").one()
+    Job, Hobby = human
+    Country, Department, City = geo
 
-    john.job = session.query(Job).filter(Job.name == "Engineer").one()
-    jane.job = session.query(Job).filter(Job.name == "Sales").one()
-    joe.job = session.query(Job).filter(Job.name == "Designer").one()
-    jill.job = session.query(Job).filter(Job.name == "Programmer").one()
+    async with context():
+        john, jane, joe, jill = [
+            (await db.execute(select(Person).where(Person.name == name))).scalar()
+            for name in ["John", "Jane", "Joe", "Jill"]
+        ]
 
-    john.hobby = session.query(Hobby).filter(Hobby.name == "Tennis").one()
-    jane.hobby = session.query(Hobby).filter(Hobby.name == "Tennis").one()
-    joe.hobby = session.query(Hobby).filter(Hobby.name == "Football").one()
-    jill.hobby = session.query(Hobby).filter(Hobby.name == "Basketball").one()
+        engineer, architect, designer, programmer, sales = [
+            (await db.execute(select(Job).where(Job.name == name))).scalar()
+            for name in ["Engineer", "Architect", "Designer", "Programmer", "Sales"]
+        ]
 
-    john.city = session.query(City).filter(City.name == "Milan").one()
-    jill.city = session.query(City).filter(City.name == "Milan").one()
-    jane.city = session.query(City).filter(City.name == "Palermo").one()
-    john.city = session.query(City).filter(City.name == "Catania").one()
+        tennis, soccer, basketball, baseball, football = [
+            (await db.execute(select(Hobby).where(Hobby.name == name))).scalar()
+            for name in ["Tennis", "Soccer", "Basketball", "Baseball", "Football"]
+        ]
 
-    session.commit()
+        milan, bergamo, palermo, catania = [
+            (await db.execute(select(City).where(City.name == name))).scalar()
+            for name in ["Milano", "Bergamo", "Palermo", "Catania"]
+        ]
+
+        john.job = engineer
+        jane.job = sales
+        joe.job = designer
+        jill.job = programmer
+
+        john.hobby = tennis
+        jane.hobby = tennis
+        joe.hobby = football
+        jill.hobby = basketball
+
+        john.city = milan
+        jill.city = milan
+        jane.city = palermo
+        john.city = catania
 
 @pytest_asyncio.fixture
 async def roles(auth, context):
