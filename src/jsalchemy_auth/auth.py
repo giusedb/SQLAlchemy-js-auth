@@ -151,10 +151,23 @@ class Auth:
             )
         )
 
-    async def grant(self, user_group, role_name: str, context):
+    async def _get_user_group(self, user: UserMixin) -> UserGroupMixin:
+        private_groups = {g for g in await user.awaitable_attrs.memberships if g.is_personal and g.owner_id == user.id}
+        if not private_groups:
+            user_group = self.group_model(owner_id=user.id, is_personal=True, name=f'private:{user.id}')
+            (await user.awaitable_attrs.memberships).append(user_group)
+            session.add(user_group)
+            await session.flush()
+        else:
+            user_group = next(iter(private_groups))
+        return user_group
+
+    async def grant(self, user_group: UserGroupMixin | UserMixin, role_name: str, context) -> bool:
         """Grants a role to a UserGroup in the context of a specific database record."""
         # Validate that the role can be granted to the table used in the context
         context = to_context(context)
+        if isinstance(user_group, UserMixin):
+            user_group = await self._get_user_group(user_group)
 
         # Get the role
         role = await self._get_role(role_name)
