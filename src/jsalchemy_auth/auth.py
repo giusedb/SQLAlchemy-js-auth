@@ -39,8 +39,12 @@ class Auth:
         self.group_model = group_model
         self.role_model = role_model
         self.permission_model = permission_model
-        self._define_tables(base_class)
         self.base_class = base_class
+        self._define_tables(base_class)
+        if actions:
+            for action in actions.values():
+                for permission in action.values():
+                    permission.auth = self
 
     def _define_tables(self, Base: DeclarativeBase):
         """Create all database tables for the models."""
@@ -219,11 +223,19 @@ class Auth:
 
     async def can(self, user, action: str, context):
         """Checks if a user can perform an action on the context."""
-        if action not in self.actions:
-            permission_name = action
-        else:
-            permission_name = self.actions[action]
-        return await self.has_permission(user, permission_name, context)
+        permission_name = action
+        group_ids = await self._user_groups(user.id)
+        role_ids = await self._resolve_permission(permission_name)
+        context = to_context(context)
+
+        if context.table not in self.actions:
+            self.actions[context.table] = {}
+        if action not in self.actions[context.table]:
+            paths = self._explode_partial_schema(object.__class__)
+            perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
+            self.actions[context.table][action] = perm
+
+        return await self.actions[context.table][action](group_ids, role_ids, context)
 
     async def has_permission(self, user: UserMixin, permission_name: str, context: Context | DeclarativeBase):
         """Checks if a user has the specified permission into a specific `context`."""
@@ -231,47 +243,9 @@ class Auth:
         user_groups = await self._user_groups(user.id)
         if isinstance(context, self.base_class):
             context = to_context(context)
-        roles_ids = [await self._contextual_roles(group_id, context) for group_id in user_groups ]
+        roles_ids = [await self._contextual_roles(group_id, context) for group_id in user_groups]
         valid_roles = reduce(set.union, filter(bool, roles_ids), set())
         return bool(role_ids.intersection(valid_roles))
-
-    async def has_permission_group(self, user_group, permission_name: str):
-        """Checks if a UserGroup has the specified permission."""
-        # Get the permission
-        permission = await self._get_permission(permission_name)
-        if not permission:
-            return False
-
-        # Check global permissions first
-        if permission.is_global:
-            return True
-
-        # Check roles associated with this group for the permission
-        result = await session.execute(
-            rolegrant.select().where(
-                (rolegrant.c.usergroup_id == user_group.id)
-            )
-        )
-
-        grants = result.fetchall()
-        for grant in grants:
-            # Get the role
-            role = await self._get_role_by_id(grant.role_id)
-            if not role:
-                continue
-
-            # Check if this role has the permission
-            perm_result = await session.execute(
-                role_permission.select().where(
-                    (role_permission.c.role_id == role.id) &
-                    (role_permission.c.permission_id == permission.id)
-                )
-            )
-
-            if perm_result.fetchone():
-                return True
-
-        return False
 
     async def has_role(self, user, role_name: str):
         """Checks if a user has the specified role in any context."""
