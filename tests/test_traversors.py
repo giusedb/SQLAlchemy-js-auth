@@ -75,7 +75,7 @@ async def test_lower_traverse_start(context, spatial):
         setup(Country)
         france = await db.scalar(select(Country).where(Country.name == 'France'))
         cities = {item async for item in traverse(france, 'departments.cities.name', start=3)}
-        assert {'Paris', 'Lyon', 'Annecy', 'Calais'} == cities
+        assert {'Paris', 'Lyon', 'Annecy', 'Essonne'} == cities
 
         item_types = {type(item) async for item in traverse(france, 'departments.cities.name', start=2)}
         assert {Context, str} == item_types

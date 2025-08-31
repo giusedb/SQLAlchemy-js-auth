@@ -138,7 +138,6 @@ async def human(Base, db_engine):
     await define_tables(Base, db_engine)
     return Job, Hobby
 
-
 @pytest_asyncio.fixture
 async def Person(geo, human):
     """Create the `Person` class ."""
@@ -162,10 +161,10 @@ async def spatial(geo, open_session):
     germany = Country(name="Germany")
     france = Country(name="France")
 
-    ain = Department(name="Ain", country=france)
-    ile_de_france = Department(name="Ile de France", country=france)
+    aura = Department(name="Auvergne-Rhône-Alpes", country=france)
+    ile_de_france = Department(name="Île-de-France", country=france)
     bavaria = Department(name="Bavaria", country=germany)
-    north_germany = Department(name="North Germany", country=germany)
+    brandenburg = Department(name="Brandenburg", country=germany)
     lombardy = Department(name="Lombardy", country=italy)
     sicily = Department(name="Sicily", country=italy)
     milan = City(name="Milan", department=lombardy)
@@ -174,21 +173,21 @@ async def spatial(geo, open_session):
     catania = City(name="Catania", department=sicily)
 
     paris = City(name="Paris", department=ile_de_france)
-    calais = City(name="Calais", department=ile_de_france)
-    annecy = City(name="Annecy", department=ain)
-    lyon = City(name="Lyon", department=ain)
+    essonne = City(name="Essonne", department=ile_de_france)
+    annecy = City(name="Annecy", department=aura)
+    lyon = City(name="Lyon", department=aura)
 
     munich = City(name="Munich", department=bavaria)
-    berlin = City(name="Berlin", department=north_germany)
-    bonn = City(name="Bonn", department=north_germany)
+    berlin = City(name="Potsdam", department=brandenburg)
+    oranienburg = City(name="Oranienburg", department=brandenburg)
 
     open_session.add_all([italy, germany, france])
-    open_session.add_all([ain, ile_de_france])
-    open_session.add_all([bavaria, north_germany])
+    open_session.add_all([aura, ile_de_france])
+    open_session.add_all([bavaria, brandenburg])
     open_session.add_all([lombardy, sicily])
     open_session.add_all([milan, bergamo, palermo, catania])
-    open_session.add_all([paris, calais, annecy, lyon])
-    open_session.add_all([munich, berlin, bonn])
+    open_session.add_all([paris, essonne, annecy, lyon])
+    open_session.add_all([munich, berlin, oranienburg])
 
     await open_session.commit()
     return geo
