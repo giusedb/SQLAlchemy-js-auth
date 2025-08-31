@@ -133,7 +133,7 @@ class Auth:
                     )
                 )
 
-    async def unassign(self, role_name: str, pemrission_names: List[str]) -> None:
+    async def unassign(self, role_name: str, pemrission_names: List[str]) -> bool:
         """Removes a permission from a role."""
         # Find the permission
         permission_ids = await session.execute(
@@ -203,6 +203,8 @@ class Auth:
                     context_table=context.table,
                 )
             )
+            return True
+        return False
 
     async def revoke(self, user_group, role_name: str, context: Context):
         """Revokes a role from a UserGroup in the context of a specific database record."""
@@ -327,11 +329,10 @@ class Auth:
     async def _get_role(self, name: str) -> Optional[RoleMixin]:
         """Get a role by name."""
         result = await session.execute(
-            self.role_model.__table__.select().where(
-                self.role_model.__table__.c.name == name
-            )
+            select(self.role_model)
+            .where(self.role_model.name == name)
         )
-        return result.fetchone()
+        return result.scalar_one_or_none()
 
     async def _get_role_by_id(self, id: int) -> Optional[RoleMixin]:
         """Get a role by ID."""
