@@ -6,11 +6,12 @@ from typing import Type, Dict, List, Any, Optional, Union, Set, NamedTuple
 
 from jsalchemy_web_context import db as session
 from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
-from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select
+from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select, update
 
+from jsalchemy_web_context.caching import redis_cached_function
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
-from .utils import Context, to_context, to_object
-from .models import role_permission, rolegrant, membership
+from .traversors import PathPermission, GlobalPermission
+from .utils import Context, to_context, inverted_properties
 
 
 class PermissionGrantError(Exception):

@@ -1,22 +1,16 @@
-from itertools import zip_longest, groupby
+from itertools import groupby
 from operator import itemgetter
-from tokenize import group
-from typing import List, Dict
-
-from essentials.folders import split_path
-from openapidocs.mk.common import is_reference
+from typing import List, Dict, Set
+from marshal import dumps, loads
 from sqlalchemy import Column, select
+from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE
 
-from jsalchemy_web_context import redis
-from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY
-from sqlalchemy.orm.collections import InstrumentedList, InstrumentedDict
-
-from .auth import Context
 from jsalchemy_web_context.manager import redis, db
 
-from .utils import to_context
+from .utils import Context, to_context
 
-from marshal import dumps, loads
+
+
 
 TABLE_CLASS = None
 NAME_TABLE = None
@@ -40,7 +34,6 @@ def common_path(paths: List[List[str]]) -> Dict[str, Dict | None]:
             grouped['.'.join((k, next(iter(v))))] = next(iter(v.values()))
             del grouped[k]
     return grouped
-
 
 async def resolve_attribute(context: Context, attribute: str):
     """returns the value of `attribute` for the specified `context`."""
@@ -75,13 +68,11 @@ def treefy_paths(*paths: List[str]):
     split_path = [tuple(path.split(".")) if type(path) is str else path for path in paths]
     return common_path(sorted(split_path))
 
-
 async def to_object(context: Context):
     """Convert a Context to a DeclarativeBase object."""
     if isinstance(context, DeclarativeBase):
         return context
     return await db.get(TABLE_CLASS[context.table], context.id)
-
 
 async def _referent(object: DeclarativeBase | Context, attribute: str) -> Context:
     """Get the referent of an attribute."""
