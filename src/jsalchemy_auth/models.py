@@ -11,6 +11,7 @@ class UserMixin:
 class UserGroupMixin:
     """Mixin for user group model."""
     name: Mapped[str] = mapped_column(String(150), unique=True)
+    is_personal: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class RoleMixin:
     """Mixin for role model."""
@@ -57,6 +58,8 @@ def define_tables(Base, User: UserMixin, UserGroup: UserGroupMixin, Role: RoleMi
 
     UserGroup.members = relationship(User, secondary=membership, backref='memberships')
     UserGroup.granted = relationship(Role, secondary=rolegrant, backref='grants')
+    UserGroup.owner_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey(f"{User.__tablename__}.id"))
+    UserGroup.owner = relationship(User, backref='self_group')
     Role.permissions = relationship(Permission, secondary=role_permission, backref='roles')
 
     return role_permission, rolegrant, membership
