@@ -137,9 +137,15 @@ async def traverse(object: DeclarativeBase, path: str, start:int =0):
 
 async def tree_traverse(object: DeclarativeBase, *path: str, start:int =0):
     """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
-    for path, subpath in path.items():
-        async for item in traverse(object, path, start=start - 1):
-            yield item
+    if start == 0:
+        yield object
+    path = treefy_paths(*path)
+    if path:
+        for path, subpath in path.items():
+            async for item in traverse(object, path, start=start - 1):
+                yield item
+        # TODO: continue with the subpath
+
 class PermissionChecker:
     auth: "Auth" = None
 
