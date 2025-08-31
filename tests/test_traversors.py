@@ -2,7 +2,6 @@ import pytest
 from jsalchemy_web_context import db
 from sqlalchemy import select
 
-
 @pytest.mark.asyncio
 async def test_upper_traverse(context, spatial):
     Country, Department, City = spatial
@@ -97,6 +96,19 @@ def test_treefy_paths():
     assert result == {'a.b': {'d': None, 'f': None, 'c.g': None}}, 'different length'
 
 @pytest.mark.asyncio
+async def test_tree_traverse(context, spatial, full_people, Person):
+    from jsalchemy_auth.traversors import tree_traverse
+    Country, Department, City = spatial
+    async with context():
+        italy = await db.scalar(select(Country).where(Country.name == 'Italy'))
+        cities = {x async for x in tree_traverse(italy, 'departments.cities.name', start=4)}
+        assert cities == {'Catania', 'Milan', 'Palermo', 'Bergamo'}
+
+        from jsalchemy_auth.traversors import traverse
+        activities = {x async for x in tree_traverse(italy, 'departments.cities.people.job.name', 'departments.cities.people.hobby.name')}
+        assert activities == {}
+
+@pytest.mark.asyncio
 async def test_resolve_attribute(context, spatial):
     """Test that it can resolve any attribute on the database from any context"""
     from jsalchemy_auth.utils import Context
@@ -109,3 +121,4 @@ async def test_resolve_attribute(context, spatial):
     async with context():
         assert await resolve_attribute(italy, 'name') == 'Italy'
         assert await resolve_attribute(italy, 'departments') == (Context('department', 1), Context('department', 2))
+

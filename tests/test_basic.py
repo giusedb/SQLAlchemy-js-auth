@@ -213,3 +213,63 @@ async def test_can(auth, spatial, context, roles, users):
         assert await auth.can(charlie, 'read', italy) == True
         assert await auth.can(charlie, 'read', france) == True
 
+@pytest.mark.asyncio
+async def test_global(auth, spatial, context, roles, users):
+    Country, Department, City = spatial
+
+    async with context():
+        italy = await db.scalar(select(Country).where(Country.name == 'Italy'))
+        france = await db.scalar(select(Country).where(Country.name == 'France'))
+
+        alice = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'alice'))).scalar()
+        bob = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'bob'))).scalar()
+
+        await auth.assign('admin', 'create', 'read', 'update', 'delete')
+        await auth.assign('editor', 'create', 'read', 'update')
+        await auth.assign('reader', 'read')
+
+        await auth.grant(alice, 'admin', italy)
+        await auth.grant(alice, 'editor', france)
+        await auth.grant(bob, 'editor', italy)
+
+        countries = (await db.execute(select(Country))).scalars().all()
+
+        alice_read = {country.name for country in countries if await auth.can(alice, 'read', country)}
+        bob_read = {country.name for country in countries if await auth.can(bob, 'read', country)}
+
+        assert alice_read == {'Italy', 'France'}
+        assert bob_read == {'Italy'}
+
+        await auth.set_permission_global(True, 'read')
+
+        alice_read = {country.name for country in countries if await auth.can(alice, 'read', country)}
+        bob_read = {country.name for country in countries if await auth.can(bob, 'read', country)}
+
+        assert alice_read == {'Italy', 'France', 'Germany'}
+        assert bob_read == {'Italy', 'France', 'Germany'}
+
+@pytest.mark.asyncio
+async def test_auto_private_group(context, auth, users, spatial):
+    """Test that a user gets a private group when granged a role."""
+    Country, Department, City = spatial
+
+    async with context():
+        alice = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'alice'))).scalar()
+        group_names = {g.name for g in await alice.awaitable_attrs.memberships}
+        germany = (await db.execute(select(Country).where(Country.name == 'Germany'))).scalar()
+        await auth.grant(alice, 'admin', germany)
+
+        new_groups = {g.name for g in await alice.awaitable_attrs.memberships}
+        assert len(new_groups.difference(group_names)) == 1
+        assert f"private:{alice.id}" in new_groups
+
+    async with context():
+        alice = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'alice'))).scalar()
+        group_names = {g.name for g in await alice.awaitable_attrs.memberships}
+        assert f"private:{alice.id}" in group_names
+        germany = (await db.execute(select(Country).where(Country.name == 'Germany'))).scalar()
+        await auth.grant(alice, 'admin', germany)
+
+        new_groups = {g.name for g in await alice.awaitable_attrs.memberships}
+        assert len(new_groups.difference(group_names)) == 0
+        assert f"private:{alice.id}" in new_groups
