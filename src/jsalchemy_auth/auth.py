@@ -82,14 +82,14 @@ class Auth:
         )
         return set(result.scalars())
 
-    @redis_cached_function()
+    # @redis_cached_function()
     async def _perms_to_roles(self) -> Dict[int, Set[int]]:
         all = (await session.execute(select(role_permission.c.permission_id,
                                             role_permission.c.role_id))).all()
         return {p: set(map(itemgetter(1), group))
                 for p, group in groupby(sorted(all), itemgetter(0))}
 
-    @redis_cached_function()
+    # @redis_cached_function()
     async def _perm_name_ids(self) -> Dict[str, int]:
         """Return the full translation of permission names to ids."""
         return {row.name: row.id
@@ -102,7 +102,7 @@ class Auth:
         name_ids = await self._perm_name_ids()
         return (await self._perms_to_roles())[name_ids[permission_name]]
 
-    @redis_cached_function()
+    # @redis_cached_function()
     async def _global_permissions(self) -> Set[str]:
         """Find all global permissions and return their names."""
         result = await session.execute(
