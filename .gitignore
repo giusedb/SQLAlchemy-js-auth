@@ -1,2 +1,4 @@
 *.pyc
 poetry.lock
+.idea
+.DS_Store
