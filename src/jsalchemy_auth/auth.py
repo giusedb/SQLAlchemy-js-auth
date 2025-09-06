@@ -10,7 +10,7 @@ from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, sele
 
 from jsalchemy_web_context.caching import redis_cached_function
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
-from .traversors import PathPermission, GlobalPermission
+from .checkers import PathPermission, GlobalPermission
 from .utils import Context, to_context, inverted_properties
 
 
