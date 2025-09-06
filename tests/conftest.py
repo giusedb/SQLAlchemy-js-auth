@@ -75,6 +75,8 @@ def User(Base):
 async def auth(db_engine, session, Base):
     """Create an `Auth` instance and builds the database."""
     from jsalchemy_auth import Auth
+    from jsalchemy_auth import traversors
+    traversors.TABLE_CLASS = None
 
     class User(UserMixin, Base):
         __tablename__ = "user"
@@ -141,7 +143,7 @@ async def human(Base, db_engine):
 
     class Job(Base):
         __tablename__ = "job"
-        name: MappedColumn[str]
+        name:              MappedColumn[str]
 
     class Hobby(Base):
         __tablename__ = "hobby"
@@ -172,29 +174,29 @@ async def spatial(geo, open_session):
 
     Country, Department, City = geo
 
-    italy = Country(name="Italy")
-    germany = Country(name="Germany")
-    france = Country(name="France")
+    italy = Country(name="Italy", id=1)
+    germany = Country(name="Germany", id=2)
+    france = Country(name="France", id=3)
 
-    aura = Department(name="Auvergne-Rhône-Alpes", country=france)
-    ile_de_france = Department(name="Île-de-France", country=france)
-    bavaria = Department(name="Bavaria", country=germany)
-    brandenburg = Department(name="Brandenburg", country=germany)
-    lombardy = Department(name="Lombardy", country=italy)
-    sicily = Department(name="Sicily", country=italy)
-    milan = City(name="Milan", department=lombardy)
-    bergamo = City(name="Bergamo", department=lombardy)
-    palermo = City(name="Palermo", department=sicily)
-    catania = City(name="Catania", department=sicily)
+    aura = Department(name="Auvergne-Rhône-Alpes", country=france, id=1)
+    ile_de_france = Department(name="Île-de-France", country=france, id=2)
+    bavaria = Department(name="Bavaria", country=germany, id=3)
+    brandenburg = Department(name="Brandenburg", country=germany, id=4)
+    lombardy = Department(name="Lombardy", country=italy, id=5)
+    sicily = Department(name="Sicily", country=italy, id=6)
+    milan = City(name="Milan", department=lombardy, id=1)
+    bergamo = City(name="Bergamo", department=lombardy, id=2)
+    palermo = City(name="Palermo", department=sicily, id=3)
+    catania = City(name="Catania", department=sicily, id=4)
 
-    paris = City(name="Paris", department=ile_de_france)
-    essonne = City(name="Essonne", department=ile_de_france)
-    annecy = City(name="Annecy", department=aura)
-    lyon = City(name="Lyon", department=aura)
+    paris = City(name="Paris", department=ile_de_france, id=5)
+    essonne = City(name="Essonne", department=ile_de_france, id=6)
+    annecy = City(name="Annecy", department=aura, id=7)
+    lyon = City(name="Lyon", department=aura, id=8)
 
-    munich = City(name="Munich", department=bavaria)
-    berlin = City(name="Potsdam", department=brandenburg)
-    oranienburg = City(name="Oranienburg", department=brandenburg)
+    munich = City(name="Munich", department=bavaria, id=9)
+    berlin = City(name="Potsdam", department=brandenburg, id=10)
+    oranienburg = City(name="Oranienburg", department=brandenburg, id=11)
 
     open_session.add_all([italy, germany, france])
     open_session.add_all([aura, ile_de_france])
