@@ -8,7 +8,7 @@ from jsalchemy_web_context import db as session
 from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
 from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select, update
 
-from jsalchemy_web_context.caching import redis_cached_function
+from jsalchemy_web_context.cache import redis_cache, request_cache
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
 from .checkers import PathPermission, GlobalPermission
 from .utils import Context, to_context, inverted_properties
@@ -62,6 +62,39 @@ class Auth:
         role_permission, rolegrant, membership = define_tables(
             Base, self.user_model, self.group_model, self.role_model, self.permission_model)
 
+    async def _get_role(self, name: str) -> Optional[RoleMixin]:
+        """Get a role by name."""
+        result = await session.execute(
+            select(self.role_model)
+            .where(self.role_model.name == name)
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_or_create_permission(self, name: str):
+        """Get or create a permission by name."""
+        result = await session.execute(
+            self.permission_model.__table__.select().where(
+                self.permission_model.__table__.c.name == name
+            )
+        )
+        perm = result.fetchone()
+        if not perm:
+            new_perm = self.permission_model(name=name)
+            session.add(new_perm)
+            await session.flush()
+            return new_perm
+        return perm
+
+    async def _get_or_create_role(self, name: str) -> RoleMixin:
+        """Get or create a role by name."""
+        role = await self._get_role(name)
+        if not role:
+            new_role = self.role_model(name=name)
+            session.add(new_role)
+            await session.flush()
+            return new_role
+        return role
+
     async def _user_groups(self, user_id: int) -> List[int]:
         """Get the user groups for a user."""
         result = await session.execute(
@@ -71,6 +104,8 @@ class Auth:
         )
         return {row.usergroup_id for row in result.fetchall()}
 
+    @redis_cache('group_id', 'context.id', 'context.table')
+    # @request_cache('group_id', 'context.id', 'context.table')
     async def _contextual_roles(self, group_id: int, context: Context) -> Set[int]:
         """Get the Set of Role.ids for a set of groups identified by their ids."""
         result = await session.execute(
@@ -82,14 +117,15 @@ class Auth:
         )
         return set(result.scalars())
 
-    # @redis_cached_function()
+    @redis_cache()
     async def _perms_to_roles(self) -> Dict[int, Set[int]]:
-        all = (await session.execute(select(role_permission.c.permission_id,
-                                            role_permission.c.role_id))).all()
+        all = (await session.execute(
+            select(self.permission_model.name, role_permission.c.role_id)
+            .join(role_permission, self.permission_model.id == role_permission.c.permission_id))).all()
         return {p: set(map(itemgetter(1), group))
                 for p, group in groupby(sorted(all), itemgetter(0))}
 
-    # @redis_cached_function()
+    @redis_cache()
     async def _perm_name_ids(self) -> Dict[str, int]:
         """Return the full translation of permission names to ids."""
         return {row.name: row.id
@@ -99,10 +135,12 @@ class Auth:
 
     async def _resolve_permission(self, permission_name: str) -> Set[int]:
         """Find all role ids associated with a permission name."""
-        name_ids = await self._perm_name_ids()
-        return (await self._perms_to_roles())[name_ids[permission_name]]
+        ref = await self._perms_to_roles()
+        if permission_name not in ref:
+            return set()
+        return ref[permission_name]
 
-    # @redis_cached_function()
+    @redis_cache()
     async def _global_permissions(self) -> Set[str]:
         """Find all global permissions and return their names."""
         result = await session.execute(
@@ -171,6 +209,7 @@ class Auth:
                         permission_id=permission.id
                     )
                 )
+        await self._perms_to_roles.discard_all()
 
     async def unassign(self, role_name: str, pemrission_names: List[str]) -> bool:
         """Removes a permission from a role."""
@@ -242,6 +281,7 @@ class Auth:
                     context_table=context.table,
                 )
             )
+            await self._contextual_roles.discard(user_group, context)
             return True
         return False
 
@@ -272,7 +312,7 @@ class Auth:
         if context.table not in self.actions:
             self.actions[context.table] = {}
         if action not in self.actions[context.table]:
-            paths = self._explode_partial_schema(object.__class__)
+            paths = self._explode_partial_schema(context.__class__)
             perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
             self.actions[context.table][action] = perm
 
@@ -288,96 +328,3 @@ class Auth:
         valid_roles = reduce(set.union, filter(bool, roles_ids), set())
         return bool(role_ids.intersection(valid_roles))
 
-    async def has_role(self, user, role_name: str):
-        """Checks if a user has the specified role in any context."""
-        # Get user groups
-        user_groups = await self._get_user_groups(user)
-
-        for group in user_groups:
-            # Check if this group has the role (in any context)
-            result = await session.execute(
-                rolegrant.select().where(
-                    (rolegrant.c.usergroup_id == group.id)
-                )
-            )
-
-            grants = result.fetchall()
-            for grant in grants:
-                role = await self._get_role_by_id(grant.role_id)
-                if role and role.name == role_name:
-                    return True
-
-        return False
-
-    async def has_role_group(self, user_group, role_name: str):
-        """Checks if a UserGroup has the specified role in any context."""
-        # Check if this group has the role (in any context)
-        result = await session.execute(
-            rolegrant.select().where(
-                (rolegrant.c.usergroup_id == user_group.id)
-            )
-        )
-
-        grants = result.fetchall()
-        for grant in grants:
-            role = await self._get_role_by_id(grant.role_id)
-            if role and role.name == role_name:
-                return True
-
-        return False
-
-    async def _get_or_create_permission(self, name: str):
-        """Get or create a permission by name."""
-        result = await session.execute(
-            self.permission_model.__table__.select().where(
-                self.permission_model.__table__.c.name == name
-            )
-        )
-        perm = result.fetchone()
-        if not perm:
-            new_perm = self.permission_model(name=name)
-            session.add(new_perm)
-            await session.flush()
-            return new_perm
-        return perm
-
-    async def _get_permission(self, name: str) -> Optional[PermissionMixin]:
-        """Get a permission by name."""
-        result = await session.execute(
-            self.permission_model.__table__.select().where(
-                self.permission_model.__table__.c.name == name
-            )
-        )
-        return result.fetchone()
-
-    async def _get_or_create_role(self, name: str) -> RoleMixin:
-        """Get or create a role by name."""
-        result = await session.execute(
-            self.role_model.__table__.select().where(
-                self.role_model.__table__.c.name == name
-            )
-        )
-        role = result.fetchone()
-        if not role:
-            new_role = self.role_model(name=name)
-            session.add(new_role)
-            await session.flush()
-            return new_role
-        return role
-
-    async def _get_role(self, name: str) -> Optional[RoleMixin]:
-        """Get a role by name."""
-        result = await session.execute(
-            select(self.role_model)
-            .where(self.role_model.name == name)
-        )
-        return result.scalar_one_or_none()
-
-    async def _get_role_by_id(self, id: int) -> Optional[RoleMixin]:
-        """Get a role by ID."""
-        result = await session.execute(
-            self.role_model.__table__.select().where(
-                self.role_model.__table__.c.id == id
-            )
-        )
-        return result.fetchone()
