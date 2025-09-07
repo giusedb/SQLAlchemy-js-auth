@@ -3,7 +3,7 @@ from typing import Set, List
 from sqlalchemy.orm import DeclarativeBase
 
 from jsalchemy_auth.traversors import treefy_paths, tree_traverse
-from jsalchemy_auth.utils import to_context
+from jsalchemy_auth.utils import to_context, ContextSet, Context
 
 
 class PermissionChecker:
@@ -24,11 +24,14 @@ class PathPermission(PermissionChecker):
 
     async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         """Check weather at least one of the roles are assigned to """
-        async for context in tree_traverse(object, self.paths):
-            for group_id in group_ids:
-                context_role_ids = await self.auth._contextual_roles(group_id, context)
-                if context_role_ids.intersection(role_ids):
-                    return True
+        async for contexts in tree_traverse(object, self.paths, is_root=True):
+            if isinstance(contexts, Context):
+                contexts = [contexts]
+            for context in contexts:
+                for group_id in group_ids:
+                    context_role_ids = await self.auth._contextual_roles(group_id, context)
+                    if context_role_ids.intersection(role_ids):
+                        return True
         return False
 
 class GlobalPermission(PermissionChecker):
