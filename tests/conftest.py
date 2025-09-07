@@ -1,6 +1,8 @@
 # pylint: disable=redefined-outer-name
 # pylint: disable=too-few-public-methods
 # pylint: disable=import-outside-toplevel
+import os
+
 import pytest_asyncio
 from pytest import fixture
 from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select
@@ -27,13 +29,16 @@ def sync_db_engine():
 @fixture()
 def db_engine():
     """Create a test SQLAlchemy database engine."""
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    if os.path.exists('db.sqlite'):
+        os.remove('db.sqlite')
+    engine = create_async_engine('sqlite+aiosqlite:///db.sqlite')
+    # engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     return engine
 
 @fixture()
 def session(db_engine):
     """Create a SQLAlchemy database session."""
-    return async_sessionmaker(bind=db_engine, expire_on_commit=False)
+    return async_sessionmaker(bind=db_engine, expire_on_commit=False, autoflush=True)
 
 @fixture
 def open_session(session):
