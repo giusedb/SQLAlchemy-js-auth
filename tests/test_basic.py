@@ -50,8 +50,7 @@ async def test_contextual_roles(context, auth, users, roles, spatial):
         france = await db.scalar(select(Country).where(Country.name == 'France'))
         alice_group = await db.scalar(select(auth.group_model).where(auth.group_model.name == 'alice'))
 
-        roles = await auth._contextual_roles(alice_group.id,
-                                             to_context(france))
+        roles = await auth._contextual_roles(alice_group.id, to_context(france))
 
         role_names = set((await db.execute(select(auth.role_model.name).where(auth.role_model.id.in_(roles)))).scalars().all())
         assert role_names == {'admin', 'editor'}
@@ -173,7 +172,8 @@ async def test_permissions(auth, spatial, context, roles, users):
         x = await auth.has_permission(charlie, 'read', france)
         assert x == True
 
-@pytest.mark.skip(reason="To be reviewed")
+# @pytest.mark.skip(reason="To be reviewed")
+@pytest.mark.asyncio
 async def test_can(auth, spatial, context, roles, users):
     Country, Department, City = spatial
 
@@ -213,13 +213,16 @@ async def test_can(auth, spatial, context, roles, users):
         assert await auth.can(charlie, 'read', italy) == True
         assert await auth.can(charlie, 'read', france) == True
 
+# @pytest.mark.skip(reason="Disable due to the caching")
 @pytest.mark.asyncio
-async def test_global(auth, spatial, context, roles, users):
+async def test_global_permission(auth, spatial, context, roles, users):
+
     Country, Department, City = spatial
 
     async with context():
         italy = await db.scalar(select(Country).where(Country.name == 'Italy'))
         france = await db.scalar(select(Country).where(Country.name == 'France'))
+        germany = await db.scalar(select(Country).where(Country.name == 'Germany'))
 
         alice = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'alice'))).scalar()
         bob = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'bob'))).scalar()
@@ -228,9 +231,12 @@ async def test_global(auth, spatial, context, roles, users):
         await auth.assign('editor', 'create', 'read', 'update')
         await auth.assign('reader', 'read')
 
+        await db.commit()
         await auth.grant(alice, 'admin', italy)
         await auth.grant(alice, 'editor', france)
         await auth.grant(bob, 'editor', italy)
+
+        await db.commit()
 
         countries = (await db.execute(select(Country))).scalars().all()
 
@@ -247,7 +253,22 @@ async def test_global(auth, spatial, context, roles, users):
 
         assert alice_read == {'Italy', 'France', 'Germany'}
         assert bob_read == {'Italy', 'France', 'Germany'}
+        assert await auth.can(alice, 'read', germany) == True
+        assert await auth.can(bob, 'read', germany) == True
+        assert await auth.can(alice, 'delete', germany) == False  # Germany is not assigned to alice
+        assert await auth.can(alice, 'delete', italy) == True
+        assert await auth.can(bob, 'delete', italy) == False
+        assert await auth.can(alice, 'update', italy) == True
+        assert await auth.can(bob, 'update', italy) == True
 
+        await auth.set_permission_global(True, 'delete')
+        assert await auth.can(alice, 'delete', germany) == True
+        assert await auth.can(alice, 'delete', italy) == True
+        assert await auth.can(bob, 'delete', italy) == False
+        assert await auth.can(bob, 'delete', france) == False
+        assert await auth.can(alice, 'delete', germany) == True  # now delete is global and Alice has it.
+
+# @pytest.mark.skip(reason="Disable due to the caching")
 @pytest.mark.asyncio
 async def test_auto_private_group(context, auth, users, spatial):
     """Test that a user gets a private group when granged a role."""
