@@ -3,7 +3,7 @@ from operator import itemgetter
 from typing import List, Dict, Set, Iterable, AsyncIterable
 from marshal import dumps, loads
 
-from sqlalchemy import Column, select
+from sqlalchemy import Column, select, false
 from sqlalchemy.engine.reflection import cache
 from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE
 
@@ -157,8 +157,10 @@ async def traverse(object: DeclarativeBase, path: str, start:int =0, with_depth:
         if start <= n:
             yield (current, n) if with_depth else current
 
-async def tree_traverse(object: DeclarativeBase, path: Dict[str, Dict | None], start:int =0):
+async def tree_traverse(object: DeclarativeBase, path: Dict[str, Dict | None], start:int =0, is_root=False):
     """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
+    if is_root:
+        yield object
     if path:
         for n, (segment, subpath) in enumerate(path.items()):
             seg_len = segment.count(".") + 1
