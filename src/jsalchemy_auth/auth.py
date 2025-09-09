@@ -357,7 +357,7 @@ class Auth:
             perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
             self.actions[context.table][action] = perm
 
-        return await self.actions[context.table][action](group_ids, role_ids, context)
+        return await self.actions[context.table][action](user, group_ids, role_ids, context)
 
     async def has_permission(self, user: UserMixin, permission_name: str, context: Context | DeclarativeBase):
         """Checks if a user has the specified permission into a specific `context`."""
