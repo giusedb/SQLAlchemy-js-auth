@@ -31,8 +31,8 @@ def db_engine():
     """Create a test SQLAlchemy database engine."""
     if os.path.exists('db.sqlite'):
         os.remove('db.sqlite')
-    engine = create_async_engine('sqlite+aiosqlite:///db.sqlite')
-    # engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    # engine = create_async_engine('sqlite+aiosqlite:///db.sqlite')
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     return engine
 
 @fixture()
@@ -126,18 +126,23 @@ async def geo(Base, db_engine):
     class Country(Base):
         __tablename__ = "country"
         name: MappedColumn[str]
+        president_id: MappedColumn[int] = mapped_column(Integer, nullable=True)
 
     class Department(Base):
         __tablename__ = "department"
         name: MappedColumn[str]
         country_id: MappedColumn[int] = Column(Integer, ForeignKey("country.id"))
+        president_id: Mapped[int] = mapped_column(Integer, nullable=True)
         country: MappedColumn["Country"] = relationship("Country", backref="departments")
 
     class City(Base):
         __tablename__ = "city"
         name: MappedColumn[str]
+        mayor_id: Mapped[int] = mapped_column(Integer, nullable=True)
         department_id: MappedColumn[int] = Column(Integer, ForeignKey("department.id"))
         department: MappedColumn["Department"] = relationship("Department", backref="cities")
+
+
 
     await define_tables(Base, db_engine)
     return Country, Department, City
@@ -179,23 +184,23 @@ async def spatial(geo, open_session):
 
     Country, Department, City = geo
 
-    italy = Country(name="Italy", id=1)
+    italy = Country(name="Italy", id=1, president_id=2)
     germany = Country(name="Germany", id=2)
     france = Country(name="France", id=3)
 
-    aura = Department(name="Auvergne-Rhône-Alpes", country=france, id=1)
-    ile_de_france = Department(name="Île-de-France", country=france, id=2)
-    bavaria = Department(name="Bavaria", country=germany, id=3)
+    aura = Department(name="Auvergne-Rhône-Alpes", country=france, id=1, president_id=1)
+    ile_de_france = Department(name="Île-de-France", country=france, id=2, president_id=2)
+    bavaria = Department(name="Bavaria", country=germany, id=3, president_id=3)
     brandenburg = Department(name="Brandenburg", country=germany, id=4)
     lombardy = Department(name="Lombardy", country=italy, id=5)
-    sicily = Department(name="Sicily", country=italy, id=6)
+    sicily = Department(name="Sicily", country=italy, id=6, president_id=1)
     milan = City(name="Milan", department=lombardy, id=1)
     bergamo = City(name="Bergamo", department=lombardy, id=2)
-    palermo = City(name="Palermo", department=sicily, id=3)
+    palermo = City(name="Palermo", department=sicily, id=3, mayor_id=1)
     catania = City(name="Catania", department=sicily, id=4)
 
     paris = City(name="Paris", department=ile_de_france, id=5)
-    essonne = City(name="Essonne", department=ile_de_france, id=6)
+    essonne = City(name="Essonne", department=ile_de_france, id=6, mayor_id=2)
     annecy = City(name="Annecy", department=aura, id=7)
     lyon = City(name="Lyon", department=aura, id=8)
 
