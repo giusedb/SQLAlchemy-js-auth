@@ -98,10 +98,10 @@ class OrPermission(PermissionChecker):
         for checker in self.checkers:
             checker.auth = auth
 
-    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         context = to_context(object)
         for checker in self.checkers:
-            if await checker(group_ids, role_ids, context):
+            if await checker(user, group_ids, role_ids, context):
                 return True
         return False
 
@@ -118,7 +118,7 @@ class AndPermission(PermissionChecker):
         for checker in self.checkers:
             checker.auth = auth
 
-    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         context = to_context(object)
         for checker in self.checkers:
             if not await checker(group_ids, role_ids, context):
@@ -137,6 +137,6 @@ class NotPermission(PermissionChecker):
     def auth(self, auth: "Auth"):
         self.checker.auth = auth
 
-    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         context = to_context(object)
         return not await self.checker(group_ids, role_ids, context)
