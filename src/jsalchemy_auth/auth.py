@@ -6,12 +6,13 @@ from typing import Type, Dict, List, Any, Optional, Union, Set, NamedTuple
 
 from jsalchemy_web_context import db as session
 from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
-from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select, update
+from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select, update, Select
 
 from jsalchemy_web_context.cache import redis_cache, request_cache
+from .utils import Context, to_context, inverted_properties, ContextSet
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
 from .checkers import PathPermission, GlobalPermission
-from .utils import Context, to_context, inverted_properties
+from .traversers import setup_traversers
 
 
 class PermissionGrantError(Exception):
@@ -22,6 +23,8 @@ GLOBAL_CONTEXT = Context(id=0, table='global_context')
 
 class Auth:
     _all_paths: Dict[str, PathPermission] = {}
+    _propagation_schema: Dict[str, List[str]] = {}
+    _inv_propagation_schema: Dict[str, List[str]] = {}
 
     def __init__(
             self,
@@ -31,9 +34,9 @@ class Auth:
             user_model: Type[UserMixin] = None,
             group_model: Type[UserGroupMixin] = None,
             role_model: Type[RoleMixin] = None,
-            permission_model: Type[PermissionMixin] = None
+            permission_model: Type[PermissionMixin] = None,
+
     ):
-        self.propagation_schema = propagation_schema or {}
         self.actions = actions or {}
         self.user_model = user_model
         self.group_model = group_model
@@ -45,6 +48,22 @@ class Auth:
             for action in actions.values():
                 for permission in action.values():
                     permission.auth = self
+        setup_traversers(self.user_model)
+        self.propagation_schema = propagation_schema or {}
+
+    @property
+    def propagation_schema(self):
+        return self._permission_schema
+
+    @propagation_schema.setter
+    def propagation_schema(self, value):
+        self._permission_schema = value or {}
+        self._inv_propagation_schema = inverted_properties(value or {})
+
+    @property
+    def inv_propagation_schema(self):
+        return self._inv_propagation_schema
+
 
     def _define_tables(self, Base: DeclarativeBase):
         """Create all database tables for the models."""
@@ -104,8 +123,8 @@ class Auth:
         )
         return {row.usergroup_id for row in result.fetchall()}
 
+    @request_cache('group_id', 'context.id', 'context.table')
     @redis_cache('group_id', 'context.id', 'context.table')
-    # @request_cache('group_id', 'context.id', 'context.table')
     async def _contextual_roles(self, group_id: int, context: Context) -> Set[int]:
         """Get the Set of Role.ids for a set of groups identified by their ids."""
         result = await session.execute(
@@ -117,6 +136,7 @@ class Auth:
         )
         return set(result.scalars())
 
+    @request_cache()
     @redis_cache()
     async def _perms_to_roles(self) -> Dict[int, Set[int]]:
         all = (await session.execute(
@@ -125,6 +145,7 @@ class Auth:
         return {p: set(map(itemgetter(1), group))
                 for p, group in groupby(sorted(all), itemgetter(0))}
 
+    @request_cache()
     @redis_cache()
     async def _perm_name_ids(self) -> Dict[str, int]:
         """Return the full translation of permission names to ids."""
@@ -140,6 +161,7 @@ class Auth:
             return set()
         return ref[permission_name]
 
+    @request_cache()
     @redis_cache()
     async def _global_permissions(self) -> Set[str]:
         """Find all global permissions and return their names."""
@@ -164,13 +186,29 @@ class Auth:
         """Return the inverted schema."""
         return inverted_properties(self.propagation_schema)
 
-    def _explode_partial_schema(self, model_class: Type[DeclarativeBase]):
+    def _explode_partial_schema(self, table: str, depth: int = 0) -> Set[str]:
         """Follow the schema provided and build all paths from a model class."""
-        def explore(schema: Dict[str, List[str]]):
-            for key, value in schema.items():
-                yield key
-                yield from explore(value)
-        return list(explore(self.propagation_schema))
+
+        def tree_explore(node: str) -> Set[str]:
+            """
+            Return all dotted paths that can be formed from ``node`` by following the
+            relations defined in ``schema``.
+            """
+            nonlocal schema
+            if node not in schema:
+                return set()
+
+            paths: Set[str] = set()
+            for child in schema[node]:
+                node_name = node + "." if depth > 0 else ""
+                # the direct edge
+                paths.add(child)
+                # recursively extend from the child
+                paths.update({f"{child}.{sub}" for sub in tree_explore(child)})
+
+            return paths
+        schema = self.inv_propagation_schema
+        return tree_explore(table)
 
     async def set_permission_global(self, is_global: bool, *permission_name: List[str]):
         """Set a permission to be global."""
@@ -281,7 +319,8 @@ class Auth:
                     context_table=context.table,
                 )
             )
-            await self._contextual_roles.discard(user_group, context)
+            await self._contextual_roles.discard(self, user_group.id, context)
+            # await self.contexts_by_permission.discard(self, user_group.id, context)
             return True
         return False
 
@@ -301,6 +340,8 @@ class Auth:
                 (rolegrant.c.context_table == context.table)
             )
         )
+        await self._contextual_roles.discard(self, user_group.id, context)
+        # await self.contexts_by_permission.discard(self, user_group.id, context)
 
     async def can(self, user, action: str, context):
         """Checks if a user can perform an action on the context."""
@@ -312,7 +353,7 @@ class Auth:
         if context.table not in self.actions:
             self.actions[context.table] = {}
         if action not in self.actions[context.table]:
-            paths = self._explode_partial_schema(context.__class__)
+            paths = self._explode_partial_schema(context.table)
             perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
             self.actions[context.table][action] = perm
 
@@ -328,3 +369,26 @@ class Auth:
         valid_roles = reduce(set.union, filter(bool, roles_ids), set())
         return bool(role_ids.intersection(valid_roles))
 
+    async def contexts_by_permission(self, user: UserMixin,
+                                     permission: str,) -> Set[ContextSet]:
+        """Find all contexts where the user has a specified permission."""
+        group_ids = await self._user_groups(user.id)
+
+        role_ids = await self._resolve_permission(permission)
+
+        if not group_ids or not role_ids:
+            return []
+
+        result = await session.execute(
+            select(rolegrant.c.context_table, rolegrant.c.context_id)
+            .where(
+                (rolegrant.c.usergroup_id.in_(group_ids)) &
+                (rolegrant.c.role_id.in_(role_ids))
+            )
+        )
+
+        return {ContextSet(table, tuple(map(itemgetter(1), grp)))
+                for table, grp in groupby(sorted(result.fetchall()), itemgetter(0))}
+
+    async def accessible_query(self, user: UserMixin, query: Select):
+        """Returns a query filtered by the user's permissions."""

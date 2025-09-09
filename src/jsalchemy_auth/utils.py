@@ -7,6 +7,8 @@ from typing_extensions import NamedTuple
 from jsalchemy_web_context import db
 from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 
+from jsalchemy_web_context.cache import memoize_one
+
 
 class Context(NamedTuple):
     table: str
@@ -80,7 +82,10 @@ class ContextSet(NamedTuple):
                 ids.update(context.ids)
             elif isinstance(context, Context):
                 ids.add(context.id)
-        return ContextSet(contexts[0].table, tuple(ids))
+        ret = ContextSet(contexts[0].table, tuple(filter(bool,ids)))
+        if len(ret.ids):
+            return ret
+        return None
 
 
 def to_context(object: DeclarativeBase) -> Context:
@@ -94,7 +99,7 @@ async def to_object(context: Context) -> DeclarativeBase:
     return await db.get(context.table, context.id)
 
 def invert_relation(relation: RelationshipProperty):
-    from jsalchemy_auth.traversors import CLASS_STRUCTURE
+    from jsalchemy_auth.traversers import CLASS_STRUCTURE
     inv_property_name = relation.back_populates
     if not inv_property_name:
         middle_column = property.primaryjoin.right.name
@@ -105,7 +110,7 @@ def invert_relation(relation: RelationshipProperty):
 
 def inverted_properties(schema: Dict[str, List[str]]):
     """Inverts the properties of a dictionary."""
-    from jsalchemy_auth.traversors import CLASS_STRUCTURE
+    from jsalchemy_auth.traversers import CLASS_STRUCTURE
     ret = []
     all_relations = tuple((table_name, property_name)
                      for table_name, properties in schema.items()

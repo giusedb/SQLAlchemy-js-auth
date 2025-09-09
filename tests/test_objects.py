@@ -27,8 +27,8 @@ async def test_setup(spatial, context, Base):
     auth = Auth(
         base_class=Base,
         propagation_schema={
-            'Country': ['departments'],
-            'Department': ['cities'],
+            'country': ['departments'],
+            'department': ['cities'],
         },
     )
 
@@ -40,14 +40,6 @@ async def test_db(spatial, context):
     async with context() as ctx:
         countries = (await db.execute(select(Country))).scalars().all()
         assert len(countries) == 3
-        print('=-=-=')
-
-        for country in countries:
-            print(' - Country :', country.name)
-            for department in await country.awaitable_attrs.departments: # regions:
-                print('   - Department :', department.name)
-                for city in await department.awaitable_attrs.cities:
-                    print('      - City :', city.name)
 
 @pytest.mark.asyncio
 async def test_grants(spatial, context, auth, roles, users):

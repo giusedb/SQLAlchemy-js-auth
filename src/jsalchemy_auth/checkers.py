@@ -2,8 +2,8 @@ from typing import Set, List
 
 from sqlalchemy.orm import DeclarativeBase
 
-from jsalchemy_auth.traversors import treefy_paths, tree_traverse
-from jsalchemy_auth.utils import to_context, ContextSet, Context
+from jsalchemy_auth.traversers import treefy_paths, tree_traverse
+from jsalchemy_auth.utils import to_context, Context
 
 
 class PermissionChecker:
@@ -11,6 +11,12 @@ class PermissionChecker:
 
     def __or__(self, other):
         return OrPermission(self, other)
+
+    def __and__(self, other):
+        return AndPermission(self, other)
+
+    def __invert__(self):
+        return NotPermission(self)
 
     def __repr__(self):
         return f"- [{self.__class__.__name__}] -"
@@ -70,3 +76,38 @@ class OrPermission(PermissionChecker):
                 return True
         return False
 
+class AndPermission(PermissionChecker):
+    def __init__(self, *permission_checker):
+        self.checkers = permission_checker
+
+    @property
+    def auth(self):
+        return self.checkers[0].auth
+
+    @auth.setter
+    def auth(self, auth: "Auth"):
+        for checker in self.checkers:
+            checker.auth = auth
+
+    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+        context = to_context(object)
+        for checker in self.checkers:
+            if not await checker(group_ids, role_ids, context):
+                return False
+        return True
+
+class NotPermission(PermissionChecker):
+    def __init__(self, permission_checker: PermissionChecker):
+        self.checker = permission_checker
+
+    @property
+    def auth(self):
+        return self.checker.auth
+
+    @auth.setter
+    def auth(self, auth: "Auth"):
+        self.checker.auth = auth
+
+    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+        context = to_context(object)
+        return not await self.checker(group_ids, role_ids, context)

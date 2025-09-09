@@ -4,7 +4,6 @@ from typing import List, Dict, Set, Iterable, AsyncIterable
 from marshal import dumps, loads
 
 from sqlalchemy import Column, select, false
-from sqlalchemy.engine.reflection import cache
 from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE
 
 from jsalchemy_web_context.manager import redis, db, request
@@ -15,7 +14,7 @@ TABLE_CLASS = None
 NAME_TABLE = None
 CLASS_STRUCTURE = None
 
-def setup(Base):
+def setup_traversers(Base):
     """Setup the table resolver dictionaries."""
     global TABLE_CLASS, NAME_TABLE, CLASS_STRUCTURE
     TABLE_CLASS = {m.tables[0].name: m.class_ for m in Base.__mapper__.registry.mappers}
@@ -109,7 +108,6 @@ def _redis_defootprint(is_many: bool, blob: bytes, table: str = None) -> Declara
             return Context(table, object)
         return object
 
-
 async def _referent(object: DeclarativeBase | Context | ContextSet, attribute: str) -> (bool, Context | Set[Context]):
     """Get the referent of an attribute."""
     if isinstance(object, DeclarativeBase):
@@ -133,7 +131,7 @@ async def _referent(object: DeclarativeBase | Context | ContextSet, attribute: s
     if resolved:
         if is_reference:
             return is_many, ContextSet.join(*resolved.values())
-        return is_many, tuple(resolved.values())
+        return is_many, tuple(filter(bool, resolved.values()))
     return is_many, None
 
 def aggregate_references(*references: List[ContextSet | tuple]):
@@ -145,9 +143,6 @@ def aggregate_references(*references: List[ContextSet | tuple]):
 
 async def traverse(object: DeclarativeBase, path: str, start:int =0, with_depth: bool = False):
     """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
-    global TABLE_CLASS, NAME_TABLE
-    if not TABLE_CLASS:
-        setup(object.__class__)
     current = object
     split_path = tuple(path.split("."))
     for n, p in enumerate(split_path, 1):
@@ -165,7 +160,6 @@ async def tree_traverse(object: DeclarativeBase, path: Dict[str, Dict | None], s
         for n, (segment, subpath) in enumerate(path.items()):
             seg_len = segment.count(".") + 1
             async for item, depth in traverse(object, segment, with_depth=True):
-                print(f"{' ' * (10 - start + depth)} - {item}")
                 if depth >= start:
                     yield item
                 if depth == seg_len:

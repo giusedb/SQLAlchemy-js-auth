@@ -3,7 +3,7 @@ from itertools import chain
 
 import pytest
 
-from jsalchemy_auth.traversors import aggregate_references, traverse, flatten
+from jsalchemy_auth.traversers import traverse, flatten, setup_traversers
 from jsalchemy_auth.utils import ContextSet, to_context
 from jsalchemy_web_context import db
 from sqlalchemy import select
@@ -12,7 +12,7 @@ from sqlalchemy import select
 async def test_upper_traverse(context, spatial):
     Country, Department, City = spatial
 
-    from jsalchemy_auth.traversors import traverse
+    from jsalchemy_auth.traversers import traverse
     async with context() as ctx:
         city = await db.scalar(select(City).where(City.name == 'Milan'))
         countries = {item async for item in traverse(city, 'department.country.name')}
@@ -39,7 +39,7 @@ async def test_cached_trabersor(context, spatial):
 async def test_lower_traverse(context, spatial):
     Country, Department, City = spatial
 
-    from jsalchemy_auth.traversors import traverse
+    from jsalchemy_auth.traversers import traverse
     async with context():
         france = await db.scalar(select(Country).where(Country.name == 'France'))
         cts = [item async for item in traverse(france, 'departments.cities.name', start=3)]
@@ -76,13 +76,13 @@ async def test_up_and_down(context, spatial):
 
 @pytest.mark.asyncio
 async def test_referent(context, spatial):
-    from jsalchemy_auth.traversors import _referent, setup
+    from jsalchemy_auth.traversers import _referent
     from jsalchemy_auth.auth import Context
 
     Country, Department, City = spatial
     async with context():
         italy = (await db.execute(select(Country).where(Country.name == 'Italy'))).scalar()
-        setup(italy)
+        setup_traversers(italy)
         for dep in (await _referent(italy, 'departments'))[1]:
             assert type(dep) is Context
             assert dep.table == 'department'
@@ -115,14 +115,13 @@ async def test_referent(context, spatial):
 
 @pytest.mark.asyncio
 async def test_lower_traverse_start(context, spatial):
-    from jsalchemy_auth.traversors import traverse, to_object
+    from jsalchemy_auth.traversers import traverse, to_object
     from jsalchemy_auth.auth import Context
 
     Country, Department, City = spatial
 
     async with context() as ctx:
-        from jsalchemy_auth.traversors import setup
-        setup(Country)
+        setup_traversers(Country)
         france = await db.scalar(select(Country).where(Country.name == 'France'))
         cities = reduce(set.union,
                         [set(item) async for item in traverse(france, 'departments.cities.name', start=3)],
@@ -140,7 +139,7 @@ async def test_lower_traverse_start(context, spatial):
         assert {'France', 'Germany', 'Italy'} == set(chain.from_iterable(countries))
 
 def test_treefy_paths():
-    from jsalchemy_auth.traversors import treefy_paths
+    from jsalchemy_auth.traversers import treefy_paths
 
     result = treefy_paths('a.b.c', 'a.b.d', 'a.b.e')
     assert result == {'a.b': {'c': None, 'd': None, 'e': None}}, 'simple'
@@ -150,13 +149,14 @@ def test_treefy_paths():
 
 @pytest.mark.asyncio
 async def test_tree_traverse(context, spatial, full_people, Person):
-    from jsalchemy_auth.traversors import tree_traverse
-    from jsalchemy_auth.traversors import treefy_paths
-    from jsalchemy_auth import traversors
-    traversors.TABLE_CLASS = None
-
+    from jsalchemy_auth.traversers import tree_traverse
+    from jsalchemy_auth.traversers import treefy_paths
+    from jsalchemy_auth.traversers import setup_traversers
 
     Country, Department, City = spatial
+
+    setup_traversers(Country)
+
     async with context():
         italy = await db.scalar(select(Country).where(Country.name == 'Italy'))
         cities = {x async for x in flatten(
@@ -166,16 +166,15 @@ async def test_tree_traverse(context, spatial, full_people, Person):
         activities = [x async for x in flatten(tree_traverse(
             italy,
             treefy_paths('departments.cities.people.job.name', 'departments.cities.people.hobby.name'), start=5))]
-        print("activiries: ", activities)
-        assert set(activities) == {'Tennis', 'Engineer', 'Sales'}
+        assert set(activities) == {'Tennis', 'Engineer', 'Sales', 'Football', 'Basketball', 'Programmer', 'Designer'}
 
 @pytest.mark.asyncio
 async def test_resolve_attribute(context, spatial):
     """Test that it can resolve any attribute on the database from any context"""
-    from jsalchemy_auth.traversors import resolve_attribute, setup
+    from jsalchemy_auth.traversers import resolve_attribute
 
     Country, Department, City = spatial
-    setup(Country)
+    setup_traversers(Country)
 
     async with context():
         italy = to_context(await db.scalar(select(Country).where(Country.name == 'Italy')))

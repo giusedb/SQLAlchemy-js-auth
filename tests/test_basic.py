@@ -1,6 +1,6 @@
 import pytest
 
-from jsalchemy_auth.utils import to_context
+from jsalchemy_auth.utils import to_context, ContextSet
 from jsalchemy_web_context import db
 from sqlalchemy import select
 
@@ -294,3 +294,60 @@ async def test_auto_private_group(context, auth, users, spatial):
         new_groups = {g.name for g in await alice.awaitable_attrs.memberships}
         assert len(new_groups.difference(group_names)) == 0
         assert f"private:{alice.id}" in new_groups
+
+@pytest.mark.asyncio
+async def test_get_contexts_by_permission(context, auth, users, spatial, roles):
+    Country, Department, City = spatial
+
+    async with context():
+        alice = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'alice'))).scalar()
+        bob = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'bob'))).scalar()
+        charlie = (await db.execute(select(auth.user_model).where(auth.user_model.name == 'charlie'))).scalar()
+        italy = (await db.execute(select(Country).where(Country.name == 'Italy'))).scalar()
+        france = (await db.execute(select(Country).where(Country.name == 'France'))).scalar()
+        germany = (await db.execute(select(Country).where(Country.name == 'Germany'))).scalar()
+
+        await auth.grant(alice, 'admin', italy)
+        await auth.grant(alice, 'editor', france)
+        await auth.grant(alice, 'read-only', germany)
+        await auth.grant(bob, 'read-only', italy)
+        await auth.grant(charlie, 'read-only', france)
+        await auth.grant(charlie, 'read-only', italy)
+
+        await db.commit()
+
+        can_read = await auth.contexts_by_permission(alice, 'read')
+        assert can_read == {ContextSet('country', (1, 2))}
+
+        can_update = await auth.contexts_by_permission(alice, 'update')
+        assert can_update == {ContextSet('country', (1, 3))}
+
+        can_delete = await auth.contexts_by_permission(alice, 'delete')
+        assert can_delete == {ContextSet('country', (italy.id,))}
+
+        can_read = await auth.contexts_by_permission(bob, 'read')
+        assert can_read == {ContextSet('country', (italy.id,))}
+
+        can_update = await auth.contexts_by_permission(bob, 'update')
+        assert can_update == set()
+
+        can_delete = await auth.contexts_by_permission(charlie, 'delete')
+        assert can_delete == set()
+
+        can_read = await auth.contexts_by_permission(charlie, 'read')
+        assert can_read == {ContextSet('country', (1, 3))}
+
+        await auth.grant(charlie, 'read-only', await db.get(City, 1))
+        await auth.grant(charlie, 'admin', await db.get(Department, 4))
+
+        can_read = await auth.contexts_by_permission(charlie, 'read')
+        assert can_read == {ContextSet('country', (1, 3)), ContextSet('city', (1,)), ContextSet('department', (4,))}
+
+        await auth.grant(charlie, 'editor', await db.get(City, 4))
+        can_update = await auth.contexts_by_permission(charlie, 'update')
+        assert can_update == {ContextSet('department', (4,)), ContextSet('city', (4,))}
+
+
+
+
+

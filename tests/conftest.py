@@ -50,7 +50,7 @@ def context(session):
     """Build the jsalchemy_web_context context manager."""
     from jsalchemy_web_context import ContextManager
 
-    return ContextManager(session, FakeRedis.from_url('redis://localhost:6379/0'))
+    return ContextManager(session, FakeRedis())
 
 @fixture
 def Base():
@@ -80,8 +80,8 @@ def User(Base):
 async def auth(db_engine, session, Base):
     """Create an `Auth` instance and builds the database."""
     from jsalchemy_auth import Auth
-    from jsalchemy_auth import traversors
-    traversors.TABLE_CLASS = None
+    from jsalchemy_auth import traversers
+    traversers.TABLE_CLASS = None
 
     class User(UserMixin, Base):
         __tablename__ = "user"
@@ -278,7 +278,7 @@ async def full_people(Person, jobs, hobbies, geo, context, people, human):
 
         milan, bergamo, palermo, catania = [
             (await db.execute(select(City).where(City.name == name))).scalar()
-            for name in ["Milano", "Bergamo", "Palermo", "Catania"]
+            for name in ["Milan", "Bergamo", "Palermo", "Catania"]
         ]
 
         john.job = engineer
@@ -291,7 +291,7 @@ async def full_people(Person, jobs, hobbies, geo, context, people, human):
         joe.hobby = football
         jill.hobby = basketball
 
-        john.city = milan
+        joe.city = milan
         jill.city = milan
         jane.city = palermo
         john.city = catania

@@ -1,18 +1,18 @@
-[tool.poetry]
+[project]
 name = "sqlalchemy-js-authorization"
 version = "0.1.1"
-description = ""
+description = "Provide a feature-rich, flexible and performant authorization for SQLAlchemy-based model"
 authors = [
-    "Giuseppe Di Bona giusedb@gmail.com"
+    {name="Giuseppe Di Bona", email="giusedb@gmail.com"}
 ]
 readme = "README.md"
+[tool.poetry]
 packages = [{include = "jsalchemy_auth", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
 sqlalchemy = "^2.0.36"
 sqlalchemy-js-web-context = "^0.1"
-redis = "^6.4.0"
 fakeredis = "^2.31.1"
 pytest-asyncio = "^1.1.0"
 
