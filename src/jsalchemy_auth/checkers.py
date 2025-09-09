@@ -54,6 +54,21 @@ class OwnerPermission(PermissionChecker):
                 return True
         return False
 
+class GroupOwnerPermission(PermissionChecker):
+    def __init__(self, on: str, auth: "Auth"=None):
+        """check if the user id is the same as the object id following the path."""
+        self.auth = auth
+        self.path = on
+        self.path_length = on.count(".") + 1
+
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+        """Check weather at least one of the roles are assigned to """
+        group_ids = await self.auth._has_any_role(group_ids, role_ids)
+        async for value in traverse(object, self.path, is_root=True, start=self.path_length):
+            if set(value).intersection(group_ids):
+                return True
+        return False
+
 class GlobalPermission(PermissionChecker):
 
     def __init__(self, permission: str, auth: "Auth"=None):
