@@ -4,7 +4,8 @@ from typing import List, Dict, Set, Iterable, AsyncIterable
 from marshal import dumps, loads
 
 from sqlalchemy import Column, select, false
-from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE
+from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE, \
+    relationship
 
 from jsalchemy_web_context.manager import redis, db, request
 
@@ -35,6 +36,7 @@ def common_path(paths: List[List[str]]) -> Dict[str, Dict | None]:
 
 async def resolve_attribute(context: ContextSet | Context, attribute: str) -> dict:
     """returns the value of `attribute` for the specified `context`."""
+    # TODO: Use the __mapper__.relationships.<attribute>.synchronize_pairs
     sqla_attribute = CLASS_STRUCTURE[context.table][attribute]
     if isinstance(context, Context):
         context = ContextSet(context.table, (context.id,))
@@ -170,4 +172,18 @@ async def flatten(iterator: AsyncIterable) -> Iterable:
     async for items in iterator:
         for item in items:
             yield item
+
+def class_traverse(cls: DeclarativeBase, path: str):
+    """Generates the joins to traverse the class following the attribute-paths"""
+    parts = tuple(path.split("."))
+    mapper = cls.__mapper__
+    for part in parts:
+        prop = getattr(mapper.relationships, part, None)
+        if prop is None:
+            prop = getattr(mapper.attrs, part)
+            yield prop
+            break
+        yield prop
+        mapper = prop.mapper
+
 

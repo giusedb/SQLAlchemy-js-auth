@@ -57,12 +57,18 @@ def Base():
     """Create a SQLAlchemy declarative base class."""
     class Base(AsyncAttrs, DeclarativeBase):
         id: MappedColumn[int] = Column(Integer, primary_key=True)
+        name: MappedColumn[str] = Column(String(150), nullable=False)
 
         def __repr__(self):
             return f"{self.__class__.__name__}(name={self.name})"
 
         def __str__(self):
             return f"[{self.name}-{self.id}]"
+
+        @classmethod
+        async def get_by_name(cls, name: str):
+            return (await db.execute(select(cls).where(cls.name == name))).scalar()
+
 
     return Base
 
@@ -71,8 +77,16 @@ def Base():
 def User(Base):
 
     class User(UserMixin, Base):
-        __tablename__ = "user"
+        __tablename__ = "users"
         name: Mapped[str] = mapped_column(String(150), unique=True)
+        last_name: Mapped[str] = mapped_column(String(150), nullable=True)
+
+        def __str__(self):
+            return f"[{self.name}]"
+
+        def __repr__(self):
+            return f"User(name='{self.name}', last_name='{self.last_name}')"
+
 
     return User
 

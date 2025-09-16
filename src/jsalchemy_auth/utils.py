@@ -2,6 +2,7 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Dict, List
 
+from sqlalchemy import Table
 from typing_extensions import NamedTuple
 
 from jsalchemy_web_context import db
@@ -120,3 +121,23 @@ def inverted_properties(schema: Dict[str, List[str]]):
         if isinstance(relation, RelationshipProperty):
             ret.append(invert_relation(relation))
     return {tab: {x[1] for x in grp} for tab, grp in groupby(sorted(ret), itemgetter(0))}
+
+def table_to_class(Base, table: str):
+    """Resolve any table or table name to a `DeclarativeBase` model class."""
+    if isinstance(table, Table):
+        return next(iter(mapper.class_
+                         for mapper in Base.registry.mappers
+                         if table in mapper.tables))
+    return next(iter(mapper.class_
+                     for mapper in Base.registry.mappers
+                     if any(tab.name == table for tab in mapper.tables)))
+
+def get_target_table(query):
+    """find the target of a query"""
+    target = query.froms[0]
+    if isinstance(target, Table):
+        return target
+    ret = {x.table for x in target.exported_columns}
+    if len(ret) != 1:
+        raise ValueError("Query has multiple tables")
+    return ret.pop()

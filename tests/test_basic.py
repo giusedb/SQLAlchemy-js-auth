@@ -58,7 +58,7 @@ async def test_contextual_roles(context, auth, users, roles, spatial):
 @pytest.mark.asyncio
 async def test_grants(spatial, context, auth, roles, users):
     from jsalchemy_auth.auth import PermissionGrantError
-    from jsalchemy_auth.auth import rolegrant
+    from jsalchemy_auth.models import rolegrant
     Country, Department, City = spatial
 
     async with context() as ctx:
@@ -83,7 +83,7 @@ async def test_grants(spatial, context, auth, roles, users):
 @pytest.mark.asyncio
 async def test_revoke(auth, spatial, context, roles, users):
     from jsalchemy_auth.auth import PermissionGrantError
-    from jsalchemy_auth.auth import rolegrant
+    from jsalchemy_auth.models import rolegrant
     Country, Department, City = spatial
 
     async with context() as ctx:

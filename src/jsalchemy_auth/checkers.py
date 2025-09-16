@@ -1,10 +1,11 @@
 from typing import Set, List
 
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import Select
+from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 
-from jsalchemy_auth.traversers import treefy_paths, tree_traverse
+from jsalchemy_auth.traversers import treefy_paths, tree_traverse, traverse, class_traverse
 from jsalchemy_auth.utils import to_context, Context
-
+from .models import UserMixin
 
 class PermissionChecker:
     auth: "Auth" = None
@@ -21,6 +22,14 @@ class PermissionChecker:
     def __repr__(self):
         return f"- [{self.__class__.__name__}] -"
 
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List[RelationshipProperty]:
+        """generate the joins from the permission that the user has."""
+        raise NotImplementedError
+
+    async def where(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
+        """add the where clause to the ``query`` to check the permission that the ``user`` has."""
+        raise NotImplementedError
+
 class PathPermission(PermissionChecker):
     def __init__(self,permission: str, *path: List[str], auth: "Auth"=None):
         """Check if the user has the permission for the object following the path."""
@@ -28,7 +37,7 @@ class PathPermission(PermissionChecker):
         self.paths = treefy_paths(*path) or {}
         self.auth = auth
 
-    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         """Check weather at least one of the roles are assigned to """
         async for contexts in tree_traverse(object, self.paths, is_root=True):
             if isinstance(contexts, Context):
@@ -39,6 +48,26 @@ class PathPermission(PermissionChecker):
                     if context_role_ids.intersection(role_ids):
                         return True
         return False
+
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase) -> List[RelationshipProperty]:
+        permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
+        if permitted_contexts:
+            tables = {context.table for context in permitted_contexts}
+            for path in self.paths:
+                # traverse all paths to find the tables where permissions are assigned
+                for prop in class_traverse(target, path):
+                    yield prop
+
+    async def where(self, group_ids: Set[int], target: DeclarativeBase, permission_name: str = 'read') -> List:
+        permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
+        if permitted_contexts:
+            tables = {context.table for context in permitted_contexts}
+            for path in self.paths:
+                # traverse all paths to find the tables where permissions are assigned
+                for prop in class_traverse(path):
+                    yield prop
+
+
 
 class OwnerPermission(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
@@ -53,6 +82,9 @@ class OwnerPermission(PermissionChecker):
             if user.id in value:
                 return True
         return False
+
+    def joins(self, user: UserMixin, query: Select, permission_name: str='read'):
+        """Find"""
 
 class GroupOwnerPermission(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
@@ -75,7 +107,7 @@ class GlobalPermission(PermissionChecker):
         self.auth = auth
         self.permission = permission
 
-    async def __call__(self, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
+    async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         from jsalchemy_auth.auth import GLOBAL_CONTEXT
         if self.permission in await self.auth._global_permissions():
             return await self.auth._has_any_role(group_ids, role_ids)
@@ -84,6 +116,12 @@ class GlobalPermission(PermissionChecker):
             if global_role_ids.intersection(role_ids):
                 return True
         return False
+
+    def joins(self, user: UserMixin, query: Select, permission_name: str='read'):
+        return query
+
+    def where(self, user: UserMixin, query: Select, permission_name: str='read'):
+        return query
 
 class OrPermission(PermissionChecker):
     def __init__(self, *permission_checker):
@@ -104,6 +142,11 @@ class OrPermission(PermissionChecker):
             if await checker(user, group_ids, role_ids, context):
                 return True
         return False
+
+    async def joins(self, user: UserMixin, target: DeclarativeBase, permission_name: str='read'):
+        for checker in self.checkers:
+            async for join in checker.joins(user, target, permission_name):
+                yield join
 
 class AndPermission(PermissionChecker):
     def __init__(self, *permission_checker):

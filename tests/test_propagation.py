@@ -233,14 +233,13 @@ async def test_propagation(context, spatial, db_engine, User, Base, Person, full
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     setup_traversers(auth.user_model)
-    setup_traversers(auth.user_model)
 
     async with context():
         alice = auth.user_model(name='alice')
         bob = auth.user_model(name='bob')
-        italy = (await db.execute(select(Country).where(Country.name == 'Italy'))).scalar()
-        sicily = (await db.execute(select(Department).where(Department.name == 'Sicily'))).scalar()
-        catania = (await db.execute(select(City).where(City.name == 'Catania'))).scalar()
+        italy = await Country.get_by_name('Italy')
+        sicily = await Department.get_by_name('Sicily')
+        catania = await City.get_by_name('Catania')
 
         db.add_all([alice, bob])
         await db.commit()
