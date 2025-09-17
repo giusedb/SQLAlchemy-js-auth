@@ -12,7 +12,6 @@ from jsalchemy_web_context.cache import redis_cache, request_cache
 from .utils import Context, to_context, inverted_properties, ContextSet, table_to_class, get_target_table
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
 from .checkers import PathPermission, GlobalPermission
-from .traversers import setup_traversers
 
 
 class PermissionGrantError(Exception):
@@ -48,7 +47,6 @@ class Auth:
             for action in actions.values():
                 for permission in action.values():
                     permission.auth = self
-        setup_traversers(self.user_model)
         self.propagation_schema = propagation_schema or {}
         self.to_class = partial(table_to_class, self.base_class)
 
@@ -59,7 +57,7 @@ class Auth:
     @propagation_schema.setter
     def propagation_schema(self, value):
         self._permission_schema = value or {}
-        self._inv_propagation_schema = inverted_properties(value or {})
+        self._inv_propagation_schema = inverted_properties(value or {}, self.base_class.registry)
 
     @property
     def inv_propagation_schema(self):
@@ -195,19 +193,20 @@ class Auth:
             Return all dotted paths that can be formed from ``node`` by following the
             relations defined in ``schema``.
             """
-            nonlocal schema
+            nonlocal schema, mappers
             if node not in schema:
                 return set()
 
             paths: Set[str] = set()
             for child in schema[node]:
-                node_name = node + "." if depth > 0 else ""
                 # the direct edge
                 paths.add(child)
+                child_class = mappers[node].relationships[child].entity.class_.__name__
                 # recursively extend from the child
-                paths.update({f"{child}.{sub}" for sub in tree_explore(child)})
+                paths.update({f"{child}.{sub}" for sub in tree_explore(child_class)})
 
             return paths
+        mappers = {m.class_.__name__: m for m in self.base_class.registry.mappers}
         schema = self.inv_propagation_schema
         return tree_explore(table)
 
@@ -349,7 +348,7 @@ class Auth:
         if context.table not in self.actions:
             self.actions[context.table] = {}
         if action not in self.actions[context.table]:
-            paths = self._explode_partial_schema(context.table)
+            paths = self._explode_partial_schema(context.model.__name__)
             perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
             self.actions[context.table][action] = perm
         return self.actions[context.table][action]

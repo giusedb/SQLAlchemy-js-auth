@@ -3,71 +3,67 @@ from sqlalchemy import select, String
 
 from jsalchemy_auth import Auth
 from jsalchemy_web_context import db
-from jsalchemy_auth.traversers import setup_traversers
 
 
 def test_schema_inversion(Person):
     from jsalchemy_auth.utils import inverted_properties
-    setup_traversers(Person)
 
     schema = {
-        'country': ['departments'],
-        'department': ['cities'],
-        'job': ['people'],
-        'hobby': ['people'],
-        'city': ['people']
+        'Country': ['departments'],
+        'Department': ['cities'],
+        'Job': ['people'],
+        'Hobby': ['people'],
+        'City': ['people']
     }
-    inv_schema = inverted_properties(schema)
+    inv_schema = inverted_properties(schema, Person.registry)
 
     assert inv_schema == {
-        'person': {'job', 'hobby', 'city'},
-        'city': {'department'},
-        'department': {'country'},
+        'Person': {'job', 'hobby', 'city'},
+        'City': {'department'},
+        'Department': {'country'},
     }
 
 def test_schema_inversion_2(Person):
     from jsalchemy_auth.utils import inverted_properties
-    setup_traversers(Person)
 
     schema = {
-        'country': {'departments'},
-        'department': {'cities'},
-        'job': {'people'},
-        'hobby': {'people'},
-        'city': {'people'},
+        'Country': {'departments'},
+        'Department': {'cities'},
+        'Job': {'people'},
+        'Hobby': {'people'},
+        'City': {'people'},
     }
-    inv_schema = inverted_properties(schema)
+    inv_schema = inverted_properties(schema, Person.registry)
 
     assert inv_schema == {
-        'person': {'job', 'hobby', 'city'},
-        'city': {'department'},
-        'department': {'country'},
+        'Person': {'job', 'hobby', 'city'},
+        'City': {'department'},
+        'Department': {'country'},
     }
 
-    assert schema == inverted_properties(inv_schema)
+    assert schema == inverted_properties(inv_schema, Person.registry)
 
 def test_explode_partial_schema(Person, Base):
 
-    setup_traversers(Person)
     schema = {
-        'country': {'departments'},
-        'department': {'cities'},
-        'job': {'people'},
-        'hobby': {'people'},
-        'city': {'people'},
+        'Country': {'departments'},
+        'Department': {'cities'},
+        'Job': {'people'},
+        'Hobby': {'people'},
+        'City': {'people'},
     }
     auth = Auth(Base, propagation_schema=schema)
 
-    inv_paths = auth._explode_partial_schema('person')
+    inv_paths = auth._explode_partial_schema('Person')
     assert inv_paths == {'job', 'hobby', 'city', 'city.department', 'city.department.country'}
 
-    assert auth._explode_partial_schema('city') == {
+    assert auth._explode_partial_schema('City') == {
         'department', 'department.country'}
 
-    assert auth._explode_partial_schema('department') == {
+    assert auth._explode_partial_schema('Department') == {
         'country'}
 
-    assert auth._explode_partial_schema('country') == set()
+    assert auth._explode_partial_schema('Country') == set()
 
 # @pytest.mark.skip(reason="Disable due to the caching")
 @pytest.mark.asyncio
@@ -91,8 +87,6 @@ async def test_actions(context, spatial, db_engine, User, Base):
             }
         },
     )
-    setup_traversers(auth.user_model)
-
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -163,7 +157,6 @@ async def test_actions_2(context, spatial, db_engine, User, Base):
             }
         },
     )
-    setup_traversers(auth.user_model)
 
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -223,16 +216,15 @@ async def test_propagation(context, spatial, db_engine, User, Base, Person, full
         base_class=Base,
         user_model=User,
         propagation_schema={
-            'country': ['departments'],
-            'department': ['cities'],
-            'job': ['people'],
-            'city': ['people'],
-            'hobby': ['people'],
+            'Country': ['departments'],
+            'Department': ['cities'],
+            'Job': ['people'],
+            'City': ['people'],
+            'Hobby': ['people'],
         },
     )
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    setup_traversers(auth.user_model)
 
     async with context():
         alice = auth.user_model(name='alice')

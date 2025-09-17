@@ -2,11 +2,12 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Dict, List
 
+import sqlalchemy
 from sqlalchemy import Table
 from typing_extensions import NamedTuple
 
 from jsalchemy_web_context import db
-from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
+from sqlalchemy.orm import DeclarativeBase, RelationshipProperty, Mapper, registry
 
 from jsalchemy_web_context.cache import memoize_one
 
@@ -117,27 +118,28 @@ async def to_object(context: Context) -> DeclarativeBase:
     """Convert a Context to a DeclarativeBase object."""
     return await db.get(context.model, context.id)
 
-def invert_relation(relation: RelationshipProperty):
-    from jsalchemy_auth.traversers import CLASS_STRUCTURE
-    inv_property_name = relation.back_populates
-    if not inv_property_name:
-        middle_column = property.primaryjoin.right.name
-        inv_property_name = {name for name, prop in CLASS_STRUCTURE[relation.target.name].items()
-                             if isinstance(prop, RelationshipProperty)
-                             and prop.primaryjoin.right.name == middle_column}
-    return relation.target.name, inv_property_name
-
-def inverted_properties(schema: Dict[str, List[str]]):
+def inverted_properties(schema: Dict[str, List[str]], registry: sqlalchemy.orm.decl_api.registry):
     """Inverts the properties of a dictionary."""
-    from jsalchemy_auth.traversers import CLASS_STRUCTURE
+
+    def invert_relation(relation: RelationshipProperty):
+        inv_property_name = relation.back_populates
+        if not inv_property_name:
+            middle_column = property.primaryjoin.right.name
+            inv_property_name = {name for name, prop in CLASS_STRUCTURE[relation.target.name].items()
+                                 if isinstance(prop, RelationshipProperty)
+                                 and prop.primaryjoin.right.name == middle_column}
+        return relation.entity.class_.__name__, inv_property_name
+
+    idx_mappers = {m.class_.__name__: m for m in registry.mappers}
+    idx_mappers.update({m.tables[0].name: m for m in registry.mappers})
     ret = []
     all_relations = tuple((model_name, property_name)
-                     for model_name, properties in schema.items()
-                     for property_name in properties)
+                          for model_name, properties in schema.items()
+                          for property_name in properties)
     for model_name, property_name in all_relations:
-        relation = CLASS_STRUCTURE[model_name][property_name]
-        if isinstance(relation, RelationshipProperty):
-            ret.append(invert_relation(relation))
+        mapper = idx_mappers[model_name].mapper
+        if property_name in mapper.relationships:
+            ret.append(invert_relation(mapper.relationships[property_name]))
     return {tab: {x[1] for x in grp} for tab, grp in groupby(sorted(ret), itemgetter(0))}
 
 def table_to_class(Base, table: str):

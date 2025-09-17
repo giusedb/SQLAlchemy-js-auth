@@ -10,17 +10,6 @@ from jsalchemy_web_context.manager import redis, db
 
 from .utils import Context, to_context, ContextSet
 
-TABLE_CLASS = None
-NAME_TABLE = None
-CLASS_STRUCTURE = None
-
-def setup_traversers(Base):
-    """Setup the table resolver dictionaries."""
-    global TABLE_CLASS, NAME_TABLE, CLASS_STRUCTURE
-    TABLE_CLASS = {m.tables[0].name: m.class_ for m in Base.__mapper__.registry.mappers}
-    NAME_TABLE = dict(Base.metadata.tables)
-    CLASS_STRUCTURE = {m.class_.__tablename__: dict(m.class_.__mapper__.attrs) for m in Base.__mapper__.registry.mappers}
-
 def common_path(paths: List[List[str]]) -> Dict[str, Dict | None]:
     """Identifies the common path from a list of list of string."""
     if not paths or not any(paths):

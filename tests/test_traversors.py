@@ -14,17 +14,17 @@ async def test_upper_traverse(context, spatial):
 
     from jsalchemy_auth.traversers import traverse
     async with context() as ctx:
-        city = await db.scalar(select(City).where(City.name == 'Milan'))
+        city = await City.get_by_name('Milan')
         countries = {item async for item in traverse(city, 'department.country.name')}
 
         assert ('Italy',) in countries
-        assert ContextSet('country', (1,)) in countries
-        assert ContextSet('department', (5,)) in countries
-        assert ContextSet('department', (1,)) not in countries
+        assert ContextSet(Country, (1,)) in countries
+        assert ContextSet(Department, (5,)) in countries
+        assert ContextSet(Department, (1,)) not in countries
 
 
 @pytest.mark.asyncio
-async def test_cached_trabersor(context, spatial):
+async def test_cached_traversor(context, spatial):
     Country, Department, City = spatial
 
     async with context():
@@ -174,7 +174,6 @@ async def test_resolve_attribute(context, spatial):
     from jsalchemy_auth.traversers import resolve_attribute
 
     Country, Department, City = spatial
-    setup_traversers(Country)
 
     async with context():
         italy = to_context(await db.scalar(select(Country).where(Country.name == 'Italy')))

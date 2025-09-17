@@ -5,7 +5,6 @@ from sqlalchemy.orm import mapped_column, Mapped, DeclarativeBase, RelationshipP
 from jsalchemy_auth import Auth
 from jsalchemy_auth.checkers import PathPermission, OwnerPermission, GroupOwnerPermission
 from jsalchemy_auth.models import UserMixin
-from jsalchemy_auth.traversers import setup_traversers
 from jsalchemy_web_context import db
 
 
@@ -62,7 +61,6 @@ async def test_accessible_query(full_people, Person, spatial, context, db_engine
 
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    setup_traversers(auth.user_model)
 
     async with context():
         db.add(User(name='alice', last_name='--'))
