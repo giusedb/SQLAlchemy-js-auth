@@ -3,7 +3,7 @@ from itertools import chain
 
 import pytest
 
-from jsalchemy_auth.traversers import traverse, flatten, setup_traversers
+from jsalchemy_auth.traversers import traverse, flatten
 from jsalchemy_auth.utils import ContextSet, to_context
 from jsalchemy_web_context import db
 from sqlalchemy import select
@@ -81,8 +81,7 @@ async def test_referent(context, spatial):
 
     Country, Department, City = spatial
     async with context():
-        italy = (await db.execute(select(Country).where(Country.name == 'Italy'))).scalar()
-        setup_traversers(italy)
+        italy = await Country.get_by_name('Italy')
         for dep in (await _referent(italy, 'departments'))[1]:
             assert type(dep) is Context
             assert dep.table == 'department'
@@ -121,8 +120,7 @@ async def test_lower_traverse_start(context, spatial):
     Country, Department, City = spatial
 
     async with context() as ctx:
-        setup_traversers(Country)
-        france = await db.scalar(select(Country).where(Country.name == 'France'))
+        france = await Country.get_by_name('France')
         cities = reduce(set.union,
                         [set(item) async for item in traverse(france, 'departments.cities.name', start=3)],
                         set())
@@ -151,14 +149,12 @@ def test_treefy_paths():
 async def test_tree_traverse(context, spatial, full_people, Person):
     from jsalchemy_auth.traversers import tree_traverse
     from jsalchemy_auth.traversers import treefy_paths
-    from jsalchemy_auth.traversers import setup_traversers
 
     Country, Department, City = spatial
 
-    setup_traversers(Country)
 
     async with context():
-        italy = await db.scalar(select(Country).where(Country.name == 'Italy'))
+        italy = await Country.get_by_name('Italy')
         cities = {x async for x in flatten(
             (x async for x in tree_traverse(italy, treefy_paths('departments.cities.name'), start=3)))}
         assert cities == {'Catania', 'Milan', 'Palermo', 'Bergamo'}
@@ -176,8 +172,8 @@ async def test_resolve_attribute(context, spatial):
     Country, Department, City = spatial
 
     async with context():
-        italy = to_context(await db.scalar(select(Country).where(Country.name == 'Italy')))
-        france = to_context(await db.scalar(select(Country).where(Country.name == 'France')))
+        italy = to_context(await Country.get_by_name('Italy'))
+        france = to_context(await Country.get_by_name('France'))
 
         departments = (await resolve_attribute(france, 'departments'))[france.id]
         assert departments.table == 'department'
