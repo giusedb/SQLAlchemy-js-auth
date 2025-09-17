@@ -19,7 +19,7 @@ class PermissionGrantError(Exception):
     """Raised when a permission cannot be granted to a table in the context."""
     pass
 
-GLOBAL_CONTEXT = Context(id=0, table='global_context')
+GLOBAL_CONTEXT = Context(id=0, model=None)
 
 class Auth:
     _all_paths: Dict[str, PathPermission] = {}

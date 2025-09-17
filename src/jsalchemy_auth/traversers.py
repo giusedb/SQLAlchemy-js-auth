@@ -3,11 +3,10 @@ from operator import itemgetter
 from typing import List, Dict, Set, Iterable, AsyncIterable
 from marshal import dumps, loads
 
-from sqlalchemy import Column, select, false
-from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY, MANYTOONE, \
-    relationship
+from sqlalchemy import select
+from sqlalchemy.orm import DeclarativeBase, ColumnProperty, RelationshipProperty, MANYTOMANY, ONETOMANY
 
-from jsalchemy_web_context.manager import redis, db, request
+from jsalchemy_web_context.manager import redis, db
 
 from .utils import Context, to_context, ContextSet
 
@@ -37,39 +36,42 @@ def common_path(paths: List[List[str]]) -> Dict[str, Dict | None]:
 async def resolve_attribute(context: ContextSet | Context, attribute: str) -> dict:
     """returns the value of `attribute` for the specified `context`."""
     # TODO: Use the __mapper__.relationships.<attribute>.synchronize_pairs
-    sqla_attribute = CLASS_STRUCTURE[context.table][attribute]
     if isinstance(context, Context):
-        context = ContextSet(context.table, (context.id,))
-    if isinstance(sqla_attribute, ColumnProperty):
-        target_field = sqla_attribute.columns[0]
-        source_id = TABLE_CLASS[context.table].id
-        stmt = select(source_id, target_field).where(source_id.in_(context.ids))
-        return dict((await db.execute(stmt)).all())
-    elif isinstance(sqla_attribute, (RelationshipProperty)):
-        if sqla_attribute.direction == MANYTOMANY:
+        context = ContextSet(context.model, (context.id,))
+    prop = getattr(context.model, attribute).prop
+    if isinstance(prop, ColumnProperty):
+        target_field = prop.columns[0]
+        local_field = context.model.id
+        where = local_field.in_(context.ids)
+        result = (await db.execute(select(local_field, target_field).where(where))).all()
+        return dict(result)
+    elif isinstance(prop, (RelationshipProperty)):
+        if prop.direction == MANYTOMANY:
             # TODO Many to many shall be tested
-            target_table = sqla_attribute.target.name
+            target_table = prop.target.name
             where_field = next(iter(
-                c for c in sqla_attribute.secondary.c
+                c for c in prop.secondary.c
                 if c.foreign_keys and any(x.column.table.name == context.table for x in c.foreign_keys)))
             where = where_field.in_(context.ids)
-        elif sqla_attribute.direction == ONETOMANY:
-            context_table = sqla_attribute.target.name
-            pj = sqla_attribute.primaryjoin
-            stmt = (select(pj.right, pj.right.table.c.id)
-                    .where(pj.right.in_(context.ids) if isinstance(context, ContextSet) else pj.right == context.id))
-            result = (await db.execute(stmt)).all()
-            return {key: ContextSet(context_table, tuple(x[1] for x in group))
-                    for key, group in groupby(result, itemgetter(0))}
+        elif prop.direction == ONETOMANY:
+            target_field = next(iter(prop.entity.primary_key))
+            local_field = next(iter(prop.remote_side))
+            where = local_field.in_(context.ids)
+            result = (await db.execute(select(local_field, target_field).where(where))).all()
+            return {key: ContextSet(prop.entity.class_, tuple(x[1] for x in grp))
+                    for key, grp in groupby(sorted(result), itemgetter(0))}
         else:
-            target_table = sqla_attribute.target.name
-            target_field = sqla_attribute.primaryjoin.right
-            if isinstance(context, Context):
-                where = sqla_attribute.parent.tables[0].c.id == context.id
-            else:
-                where = sqla_attribute.parent.tables[0].c.id.in_(context.ids)
-            result = (await db.execute(select(sqla_attribute.parent.tables[0].c.id, target_field).where(where))).all()
-            return {key: Context(target_table, item) for key, item in result}
+            target_field = next(iter(prop.local_columns))
+            local_field = context.model.id
+            where = local_field.in_(context.ids)
+            # target_table = prop.target.name
+            # target_field = prop.primaryjoin.right
+            # if isinstance(context, Context):
+            #     where = prop.parent.tables[0].c.id == context.id
+            # else:
+            #     where = prop.parent.tables[0].c.id.in_(context.ids)
+            result = (await db.execute(select(local_field, target_field).where(where))).all()
+            return {key: Context(prop.entity.class_, item) for key, item in result}
     return {}
 
 def treefy_paths(*paths: List[str]):
@@ -83,7 +85,7 @@ async def to_object(context: Context):
         return context
     if isinstance(context, ContextSet):
         return tuple(await to_object(c) for c in context)
-    return await db.get(TABLE_CLASS[context.table], context.id)
+    return await db.get(context.model, context.id)
 
 def _redis_footprint(object: DeclarativeBase | Context | ContextSet):
     """Serialize an object to a blob."""
@@ -97,38 +99,42 @@ def _redis_footprint(object: DeclarativeBase | Context | ContextSet):
         to_store = object
     return dumps(to_store)
 
-def _redis_defootprint(is_many: bool, blob: bytes, table: str = None) -> DeclarativeBase | Context | ContextSet:
+def _redis_defootprint(is_many: bool, blob: bytes, model: DeclarativeBase = None) -> DeclarativeBase | Context | ContextSet:
     object = loads(blob)
     if blob is None:
         return None
     if is_many:
-        if table:
-            return ContextSet(table, object)
+        if model:
+            return ContextSet(model, object)
         return set(object)
     else:
-        if table:
-            return Context(table, object)
+        if model:
+            return Context(model, object)
         return object
 
 async def _referent(object: DeclarativeBase | Context | ContextSet, attribute: str) -> (bool, Context | Set[Context]):
     """Get the referent of an attribute."""
     if isinstance(object, DeclarativeBase):
         object = to_context(object)
-    contexts = ContextSet(object.table, (object.id,)) if isinstance(object, Context) else object
+    contexts = ContextSet(object.model, (object.id,)) if isinstance(object, Context) else object
     key = f'traverse:{contexts.table}.{attribute}'
-    column = CLASS_STRUCTURE[contexts.table][attribute]
-    is_reference = isinstance(column, RelationshipProperty)
+
+    is_reference = attribute in contexts.model.__mapper__.relationships
+    if is_reference:
+        column = contexts.model.__mapper__.relationships[attribute]
+    else:
+        column = contexts.model.__mapper__.c[attribute]
     is_many = is_reference and column.direction in (MANYTOMANY, ONETOMANY)
     blobs = dict(zip(contexts.ids, await redis.hmget(key, contexts.ids)))
-    missing_contexts = ContextSet(contexts.table, tuple(key for key, value in blobs.items() if value is None))
+    missing_contexts = ContextSet(contexts.model, tuple(key for key, value in blobs.items() if value is None))
     resolved = {}
     if missing_contexts:
         resolved = await resolve_attribute(contexts, attribute)
         payload = {id: _redis_footprint(target) for id, target in resolved.items()}
         if payload:
             await redis.hset(key, mapping=payload)
-    table_name = column.target.name if is_reference else None
-    resolved.update((id, _redis_defootprint(is_many, blob, table_name))
+    model = column.entity.class_ if is_reference else None
+    resolved.update((id, _redis_defootprint(is_many, blob, model))
                     for id, blob in blobs.items() if blob is not None)
     if resolved:
         if is_reference:

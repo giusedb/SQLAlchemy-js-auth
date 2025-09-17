@@ -12,8 +12,12 @@ from jsalchemy_web_context.cache import memoize_one
 
 
 class Context(NamedTuple):
-    table: str
+    model: DeclarativeBase
     id: int
+
+    @property
+    def table(self):
+        return self.model.__tablename__ if self.model else 'global'
 
     def __add__(self, other):
         if isinstance(other, ContextSet):
@@ -22,14 +26,23 @@ class Context(NamedTuple):
             return ContextSet(self.table, (self.id, other.id))
         return ContextSet(self.table, (self.id, other))
 
+    def __str__(self):
+        return f'Context: {self.model.__name__}[{self.id}]'
+
+    __repr__ = __str__
+
 class ContextSet(NamedTuple):
-    table: str
+    model: DeclarativeBase
     ids: tuple[int]
+
+    @property
+    def table(self):
+        return self.model.__tablename__
 
     class ContextSetIterator:
 
-        def __init__(self, table, ids):
-            self.table = table
+        def __init__(self, model, ids):
+            self.model = model
             self.ids = ids
             self.index = -1
             self.length = len(ids) - 1
@@ -37,7 +50,7 @@ class ContextSet(NamedTuple):
         def __next__(self):
             if self.index < self.length:
                 self.index += 1
-                return Context(self.table, self.ids[self.index])
+                return Context(self.model, self.ids[self.index])
             raise StopIteration
 
     def __bool__(self):
@@ -47,35 +60,40 @@ class ContextSet(NamedTuple):
         return len(self.ids)
 
     def __iter__(self):
-        return iter((Context(self.table, id) for id in self.ids))
+        return iter((Context(self.model, id) for id in self.ids))
 
     def __add__(self, other):
         if isinstance(other, ContextSet):
-            if self.table != other.table:
+            if self.model != other.model:
                 raise ValueError("ContextSet tables must match")
-            return ContextSet(self.table, self.ids + other.ids)
+            return ContextSet(self.model, self.ids + other.ids)
         if isinstance(other, Context):
-            if self.table != other.table:
-                raise ValueError("ContextSet tables must match")
-            return ContextSet(self.table, self.ids + [other.id])
-        return ContextSet(self.table, self.ids + [other])
+            if self.model != other.model:
+                raise ValueError("ContextSet models must match")
+            return ContextSet(self.model, self.ids + [other.id])
+        return ContextSet(self.model, self.ids + [other])
 
     def __iter__(self):
-        return self.ContextSetIterator(self.table, self.ids)
+        return self.ContextSetIterator(self.model, self.ids)
 
     def __contains__(self, item):
         if isinstance(item, Context):
-            if item.table != self.table:
+            if item.model != self.model:
                 return False
             return item.id in self.ids
         return item in self.ids
+
+    def __repr__(self):
+        return f'ContextSet: {self.model.__name__}[{", ".join(map(str,self.ids))}]'
+
+    __str__ = __repr__
 
     @staticmethod
     def join(*contexts):
         if not contexts:
             raise ValueError("ContextSet.join requires at least one context")
-        if len({c.table for c in contexts}) != 1:
-            raise ValueError("ContextSet.join requires contexts with the same table")
+        if len({c.model for c in contexts}) != 1:
+            raise ValueError("ContextSet.join requires contexts with the same model")
 
         ids = set()
         for context in contexts:
@@ -83,7 +101,7 @@ class ContextSet(NamedTuple):
                 ids.update(context.ids)
             elif isinstance(context, Context):
                 ids.add(context.id)
-        ret = ContextSet(contexts[0].table, tuple(filter(bool,ids)))
+        ret = ContextSet(contexts[0].model, tuple(filter(bool,ids)))
         if len(ret.ids):
             return ret
         return None
@@ -93,11 +111,11 @@ def to_context(object: DeclarativeBase) -> Context:
     """Convert a DeclarativeBase object to a Context."""
     if isinstance(object, (Context, ContextSet)):
         return object
-    return Context(object.__tablename__, object.id)
+    return Context(type(object), object.id)
 
 async def to_object(context: Context) -> DeclarativeBase:
     """Convert a Context to a DeclarativeBase object."""
-    return await db.get(context.table, context.id)
+    return await db.get(context.model, context.id)
 
 def invert_relation(relation: RelationshipProperty):
     from jsalchemy_auth.traversers import CLASS_STRUCTURE
@@ -113,11 +131,11 @@ def inverted_properties(schema: Dict[str, List[str]]):
     """Inverts the properties of a dictionary."""
     from jsalchemy_auth.traversers import CLASS_STRUCTURE
     ret = []
-    all_relations = tuple((table_name, property_name)
-                     for table_name, properties in schema.items()
+    all_relations = tuple((model_name, property_name)
+                     for model_name, properties in schema.items()
                      for property_name in properties)
-    for table_name, property_name in all_relations:
-        relation = CLASS_STRUCTURE[table_name][property_name]
+    for model_name, property_name in all_relations:
+        relation = CLASS_STRUCTURE[model_name][property_name]
         if isinstance(relation, RelationshipProperty):
             ret.append(invert_relation(relation))
     return {tab: {x[1] for x in grp} for tab, grp in groupby(sorted(ret), itemgetter(0))}

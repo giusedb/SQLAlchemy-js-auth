@@ -106,10 +106,10 @@ async def test_referent(context, spatial):
 
             assert 'Italy' in (await _referent(c, 'name'))[1]
 
-        c = (await _referent(Context('city', 10000), 'department'))[1]
+        c = (await _referent(Context(City, 10000), 'department'))[1]
         assert c is None
 
-        c = (await _referent(ContextSet('city', (1, 3)), 'department'))[1]
+        c = (await _referent(ContextSet(City, (1, 3)), 'department'))[1]
         assert c.table == 'department'
         assert set(c.ids) == {5, 6}
 
@@ -134,7 +134,7 @@ async def test_lower_traverse_start(context, spatial):
         item_types = {type(await to_object(i)) async for items in traverse(france, 'departments.cities') for i in items}
         assert {Department, City} == item_types
         #
-        cities = [Context('city', x) for x in range(1, 10)]
+        cities = [Context(City, x) for x in range(1, 10)]
         countries = {c for city in cities async for c in traverse(city, 'department.country.name', 3) }
         assert {'France', 'Germany', 'Italy'} == set(chain.from_iterable(countries))
 
@@ -188,7 +188,7 @@ async def test_resolve_attribute(context, spatial):
         assert departments.table == 'department'
         assert set(departments.ids) == {5, 6}
 
-        countries = await resolve_attribute(ContextSet('department', ids=(1, 2, 3, 4)), 'country')
+        countries = await resolve_attribute(ContextSet(Department, ids=(1, 2, 3, 4)), 'country')
         countries = ContextSet.join(*countries.values())
         assert countries.table == 'country'
         assert set(countries.ids) == {2, 3}
