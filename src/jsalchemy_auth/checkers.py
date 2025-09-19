@@ -1,9 +1,9 @@
 from typing import Set, List
 
-from sqlalchemy import Select
+from sqlalchemy import Select, or_
 from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 
-from jsalchemy_auth.traversers import treefy_paths, tree_traverse, traverse, class_traverse
+from jsalchemy_auth.traversers import treefy_paths, tree_traverse, traverse, class_traverse, all_paths
 from jsalchemy_auth.utils import to_context, Context
 from .models import UserMixin
 
@@ -26,7 +26,7 @@ class PermissionChecker:
         """generate the joins from the permission that the user has."""
         raise NotImplementedError
 
-    async def where(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
         """add the where clause to the ``query`` to check the permission that the ``user`` has."""
         raise NotImplementedError
 
@@ -51,23 +51,29 @@ class PathPermission(PermissionChecker):
 
     async def joins(self, group_ids: Set[int], target: DeclarativeBase) -> List[RelationshipProperty]:
         permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
+        yielded = set()
         if permitted_contexts:
-            tables = {context.table for context in permitted_contexts}
+            models = {context.model for context in permitted_contexts}
             for path in self.paths:
                 # traverse all paths to find the tables where permissions are assigned
+                partial_path = []
                 for prop in class_traverse(target, path):
-                    yield prop
+                    partial_path.append(prop)
+                    if prop.entity.class_ in models:
+                        for p in partial_path:
+                            if p not in yielded:
+                                yield p
+                                yielded.add(p)
 
-    async def where(self, group_ids: Set[int], target: DeclarativeBase, permission_name: str = 'read') -> List:
-        permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
-        if permitted_contexts:
-            tables = {context.table for context in permitted_contexts}
-            for path in self.paths:
-                # traverse all paths to find the tables where permissions are assigned
-                for prop in class_traverse(path):
-                    yield prop
-
-
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase, permission_name: str = 'read') -> List:
+        permitted = {c.model: c.ids for c in await self.auth.contexts_by_permission(group_ids, self.permission)}
+        return or_(*(
+            model.id.in_(permitted[model])
+            for path in all_paths(self.paths)
+                for model in (
+                    self.auth.to_class(a.target)
+                    for a in class_traverse(target, path))
+                if model in permitted))
 
 class OwnerPermission(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
@@ -83,8 +89,12 @@ class OwnerPermission(PermissionChecker):
                 return True
         return False
 
-    def joins(self, user: UserMixin, query: Select, permission_name: str='read'):
-        """Find"""
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List[RelationshipProperty]:
+        for prop in class_traverse(target, '.'.join(self.path.split('.')[:-1])):
+            yield prop
+
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
+        return tuple(class_traverse(target, self.path))[-1].class_attribute == user.id
 
 class GroupOwnerPermission(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
@@ -95,11 +105,17 @@ class GroupOwnerPermission(PermissionChecker):
 
     async def __call__(self, user: UserMixin, group_ids: Set[int], role_ids: Set[int], object: DeclarativeBase) -> bool:
         """Check weather at least one of the roles are assigned to """
-        group_ids = await self.auth._has_any_role(group_ids, role_ids)
-        async for value in traverse(object, self.path, is_root=True, start=self.path_length):
+        async for value in traverse(object, self.path, start=self.path_length):
             if set(value).intersection(group_ids):
                 return True
         return False
+
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List[RelationshipProperty]:
+        for prop in class_traverse(target, '.'.join(self.path.split('.')[:-1])):
+            yield prop
+
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
+        return tuple(class_traverse(target, self.path))[-1].class_attribute.in_(group_ids)
 
 class GlobalPermission(PermissionChecker):
 

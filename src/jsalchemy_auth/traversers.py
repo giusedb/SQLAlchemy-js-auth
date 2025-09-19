@@ -181,4 +181,9 @@ def class_traverse(cls: DeclarativeBase, path: str):
         yield prop
         mapper = prop.mapper
 
-
+def all_paths(tree: Dict[str, Dict | None]) -> List[str]:
+    """Yield all paths in the tree."""
+    for key, value in tree.items():
+        yield key
+        if value:
+            yield from (f"{key}.{path}" for path in all_paths(value))

@@ -154,7 +154,7 @@ def table_to_class(Base, table: str):
 
 def get_target_table(query):
     """find the target of a query"""
-    target = query.froms[0]
+    target = query.get_final_froms()[0]
     if isinstance(target, Table):
         return target
     ret = {x.table for x in target.exported_columns}
