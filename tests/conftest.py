@@ -5,7 +5,7 @@ import os
 
 import pytest_asyncio
 from pytest import fixture
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select
+from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select, Select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import Session, relationship, MappedColumn, DeclarativeBase, mapped_column, Mapped
 
@@ -13,6 +13,11 @@ from jsalchemy_auth.models import UserMixin
 from jsalchemy_web_context import session, db, request
 from fakeredis.aioredis import FakeRedis
 
+
+def print_SQL(query):
+    return str(query.compile(compile_kwargs={'literal_binds': True}))
+
+Select.__str__ = Select.__repr__ = print_SQL
 
 async def define_tables(Base, db_engine):
     """Define the tables."""
