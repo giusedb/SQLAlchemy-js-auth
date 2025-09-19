@@ -278,11 +278,11 @@ async def people(Person, context):
         ])
 
 @pytest_asyncio.fixture
-async def full_people(Person, jobs, hobbies, geo, context, people, human):
+async def full_people(Person, jobs, hobbies, spatial, context, people, human):
     """Define a few people with jobs, hobbies and cities."""
 
     Job, Hobby = human
-    Country, Department, City = geo
+    Country, Department, City = spatial
 
     async with context():
         john, jane, joe, jill = [
@@ -319,6 +319,13 @@ async def full_people(Person, jobs, hobbies, geo, context, people, human):
         jill.city = milan
         jane.city = palermo
         john.city = catania
+        db.add_all([
+            john,
+            jane,
+            joe,
+            jill,
+        ])
+        await db.commit()
 
 @pytest_asyncio.fixture
 async def roles(auth, context):
