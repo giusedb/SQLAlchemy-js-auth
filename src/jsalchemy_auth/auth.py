@@ -343,15 +343,15 @@ class Auth:
         await self._contextual_roles.discard(self, user_group.id, context)
         # await self.contexts_by_permission.discard(self, user_group.id, context)
 
-    def _action_checker(self, action: str, context: Context):
+    def _action_checker(self, action: str, model_name: str):
         """find the checker for the action onto the context."""
-        if context.table not in self.actions:
-            self.actions[context.table] = {}
-        if action not in self.actions[context.table]:
-            paths = self._explode_partial_schema(context.model.__name__)
+        if model_name not in self.actions:
+            self.actions[model_name] = {}
+        if action not in self.actions[model_name]:
+            paths = self._explode_partial_schema(model_name)
             perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
-            self.actions[context.table][action] = perm
-        return self.actions[context.table][action]
+            self.actions[model_name][action] = perm
+        return self.actions[model_name][action]
 
     async def can(self, user, action: str, context):
         """Checks if a user can perform an action on the context."""
@@ -360,7 +360,7 @@ class Auth:
         role_ids = await self._resolve_permission(permission_name)
         context = to_context(context)
 
-        return await self._action_checker(action, context)(user, group_ids, role_ids, context)
+        return await self._action_checker(action, context.model.__name__)(user, group_ids, role_ids, context)
 
     async def has_permission(self, user: UserMixin, permission_name: str, context: Context | DeclarativeBase):
         """Checks if a user has the specified permission into a specific `context`."""
@@ -395,18 +395,19 @@ class Auth:
             )
         )
 
-        return {ContextSet(table, tuple(map(itemgetter(1), grp)))
+        return {ContextSet(self.to_class(table), tuple(map(itemgetter(1), grp)))
                 for table, grp in groupby(sorted(result.fetchall()), itemgetter(0))}
 
-    async def accessible_query(self, user: UserMixin, query: Select, action: str='read'):
+    async def accessible_query(self, user: UserMixin, query: Select, action: str='read', false_=None):
         """Returns a query filtered by the user's permissions."""
         table = get_target_table(query)
         target = self.to_class(table)
-        checker = self._action_checker(action, to_context(target))
+        checker = self._action_checker(action, target.__name__)
         group_ids = await self._user_groups(user.id)
-        for prop in {join async for join in checker.joins(group_ids, target)}:
+        joins = [join async for join in checker.joins(group_ids, target)]
+        if not joins:
+            return query.where(False)
+        for prop in joins:
             query = query.join(prop.class_attribute)
-        async for where in checker.where(group_ids, target):
-            query = query.filter(where)
-        return query
+        return query.filter(await checker.where(user, group_ids, target))
 
