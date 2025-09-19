@@ -76,13 +76,13 @@ async def test_actions(context, spatial, db_engine, User, Base):
         base_class=Base,
         user_model=User,
         actions={
-            'country': {
+            'Country': {
                 'read': PathPermission('read'),
             },
-            'department': {
+            'Department': {
                 'read': PathPermission('read', 'country'),
             },
-            'city': {
+            'City': {
                 'read': PathPermission('read', 'department.country'),
             }
         },
@@ -146,13 +146,13 @@ async def test_actions_2(context, spatial, db_engine, User, Base):
         base_class=Base,
         user_model=User,
         actions={
-            'country': {
+            'Country': {
                 'read': PathPermission('read'),
             },
-            'department': {
+            'Department': {
                 'read': PathPermission('read', 'country'),
             },
-            'city': {
+            'City': {
                 'read': PathPermission('read', 'department'),
             }
         },

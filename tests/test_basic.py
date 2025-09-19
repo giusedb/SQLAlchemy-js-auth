@@ -317,16 +317,16 @@ async def test_get_contexts_by_permission(context, auth, users, spatial, roles):
         await db.commit()
 
         can_read = await auth.contexts_by_permission(alice, 'read')
-        assert can_read == {ContextSet('country', (1, 2))}
+        assert can_read == {ContextSet(Country, (1, 2))}
 
         can_update = await auth.contexts_by_permission(alice, 'update')
-        assert can_update == {ContextSet('country', (1, 3))}
+        assert can_update == {ContextSet(Country, (1, 3))}
 
         can_delete = await auth.contexts_by_permission(alice, 'delete')
-        assert can_delete == {ContextSet('country', (italy.id,))}
+        assert can_delete == {ContextSet(Country, (italy.id,))}
 
         can_read = await auth.contexts_by_permission(bob, 'read')
-        assert can_read == {ContextSet('country', (italy.id,))}
+        assert can_read == {ContextSet(Country, (italy.id,))}
 
         can_update = await auth.contexts_by_permission(bob, 'update')
         assert can_update == set()
@@ -335,17 +335,17 @@ async def test_get_contexts_by_permission(context, auth, users, spatial, roles):
         assert can_delete == set()
 
         can_read = await auth.contexts_by_permission(charlie, 'read')
-        assert can_read == {ContextSet('country', (1, 3))}
+        assert can_read == {ContextSet(Country, (1, 3))}
 
         await auth.grant(charlie, 'read-only', await db.get(City, 1))
         await auth.grant(charlie, 'admin', await db.get(Department, 4))
 
         can_read = await auth.contexts_by_permission(charlie, 'read')
-        assert can_read == {ContextSet('country', (1, 3)), ContextSet('city', (1,)), ContextSet('department', (4,))}
+        assert can_read == {ContextSet(Country, (1, 3)), ContextSet(City, (1,)), ContextSet(Department, (4,))}
 
         await auth.grant(charlie, 'editor', await db.get(City, 4))
         can_update = await auth.contexts_by_permission(charlie, 'update')
-        assert can_update == {ContextSet('department', (4,)), ContextSet('city', (4,))}
+        assert can_update == {ContextSet(Department, (4,)), ContextSet(City, (4,))}
 
 
 

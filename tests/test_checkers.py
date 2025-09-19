@@ -9,10 +9,10 @@ from jsalchemy_web_context import db
 async def test_owner_permission(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
-        'city': {            'manage': OwnerPermission(on='mayor_id')},
-        'department': {
+        'City': {            'manage': OwnerPermission(on='mayor_id')},
+        'Department': {
             'manage': OwnerPermission(on='president_id')},
-        'country': {
+        'Country': {
             'manage': OwnerPermission(on='president_id')},
     }
 
@@ -41,11 +41,11 @@ async def test_owner_permission(Base, spatial, context, users, auth):
 async def test_owner_long(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
-        'city': {
+        'City': {
             'manage': OwnerPermission(on='department.country.president_id')},
-        'department': {
+        'Department': {
             'manage': OwnerPermission(on='country.president_id')},
-        'country': {
+        'Country': {
             'manage': OwnerPermission(on='president_id')},
     }
 
@@ -72,14 +72,14 @@ async def test_owner_long(Base, spatial, context, users, auth):
 async def test_owner_combined(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
-        'city': {
+        'City': {
             'manage': OwnerPermission(on='mayor_id') |
                       OwnerPermission(on='department.president_id') |
                       OwnerPermission(on='department.country.president_id')},
-        'department': {
+        'Department': {
             'manage': OwnerPermission(on='country.president_id') |
                       OwnerPermission(on='president_id')},
-        'country': {
+        'Country': {
             'manage': OwnerPermission(on='president_id')},
     }
 
