@@ -9,7 +9,7 @@ from typing_extensions import NamedTuple
 from jsalchemy_web_context import db
 from sqlalchemy.orm import DeclarativeBase, RelationshipProperty, Mapper, registry
 
-from jsalchemy_web_context.cache import memoize_one
+from jsalchemy_web_context.cache import memoize_one, memoize_args
 
 
 class Context(NamedTuple):
@@ -85,7 +85,7 @@ class ContextSet(NamedTuple):
         return item in self.ids
 
     def __repr__(self):
-        return f'ContextSet: {self.model.__name__}[{", ".join(map(str,self.ids))}]'
+        return f'CS[{self.model.__name__}: {", ".join(map(str,self.ids))}]'
 
     __str__ = __repr__
 

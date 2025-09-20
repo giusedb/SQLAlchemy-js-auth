@@ -275,6 +275,8 @@ async def people(Person, context):
             Person(name="Jane"),
             Person(name="Joe"),
             Person(name="Jill"),
+            Person(name="Jack"),
+            Person(name="Jule"),
         ])
 
 @pytest_asyncio.fixture
@@ -285,9 +287,9 @@ async def full_people(Person, jobs, hobbies, spatial, context, people, human):
     Country, Department, City = spatial
 
     async with context():
-        john, jane, joe, jill = [
+        john, jane, joe, jill, jack, jule = [
             (await db.execute(select(Person).where(Person.name == name))).scalar()
-            for name in ["John", "Jane", "Joe", "Jill"]
+            for name in ["John", "Jane", "Joe", "Jill", "Jack", "Jule"]
         ]
 
         engineer, architect, designer, programmer, sales = [
@@ -300,9 +302,9 @@ async def full_people(Person, jobs, hobbies, spatial, context, people, human):
             for name in ["Tennis", "Soccer", "Basketball", "Baseball", "Football"]
         ]
 
-        milan, bergamo, palermo, catania = [
+        milan, bergamo, palermo, catania, paris, munich = [
             (await db.execute(select(City).where(City.name == name))).scalar()
-            for name in ["Milan", "Bergamo", "Palermo", "Catania"]
+            for name in ["Milan", "Bergamo", "Palermo", "Catania", "Paris", "Munich"]
         ]
 
         john.job = engineer
@@ -319,6 +321,9 @@ async def full_people(Person, jobs, hobbies, spatial, context, people, human):
         jill.city = milan
         jane.city = palermo
         john.city = catania
+        jule.city = paris
+        jack.city = munich
+
         db.add_all([
             john,
             jane,

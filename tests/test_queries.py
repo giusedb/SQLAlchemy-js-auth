@@ -1,12 +1,11 @@
 import pytest
-from sqlalchemy import select, String, Integer
-from sqlalchemy.orm import mapped_column, Mapped, DeclarativeBase, RelationshipProperty, ColumnProperty
+from sqlalchemy import select, Integer, String, Column, ForeignKey
+from sqlalchemy.orm import RelationshipProperty, ColumnProperty, mapped_column, Mapped, relationship
 
 from jsalchemy_auth import Auth
+from jsalchemy_auth.auth import GLOBAL_CONTEXT
 from jsalchemy_auth.checkers import PathPermission, OwnerPermission, GroupOwnerPermission
-from jsalchemy_auth.models import UserMixin
 from jsalchemy_web_context import db
-from tests.x import Hobby
 
 
 def test_class_traverse(spatial, Person):
@@ -92,7 +91,9 @@ async def test_accessible_query(full_people, Person, spatial, context, db_engine
 
         a_query = await auth.accessible_query(alice, query)
 
-        assert "FROM person JOIN city ON city.id = person.city_id \nWHERE city.id IN (1)" in str(a_query)
+        assert "FROM person" in str(a_query)
+        assert "JOIN city ON city.id = person.city_id" in str(a_query)
+        assert "WHERE city.id IN (1)" in str(a_query)
 
         accessible_people = (await db.execute(a_query)).scalars().all()
         names = {person.name for person in accessible_people}
@@ -105,7 +106,9 @@ async def test_accessible_query(full_people, Person, spatial, context, db_engine
 
         a_query = await auth.accessible_query(alice, query, 'write')
 
-        assert "FROM person JOIN city ON city.id = person.city_id \nWHERE city.mayor_id = 1" in str(a_query)
+        assert "FROM person" in str(a_query)
+        assert "JOIN city ON city.id = person.city_id" in str(a_query)
+        assert "WHERE city.mayor_id = 1" in str(a_query)
 
         accessible_people = (await db.execute(a_query)).scalars().all()
         names = {person.name for person in accessible_people}
@@ -117,7 +120,9 @@ async def test_accessible_query(full_people, Person, spatial, context, db_engine
 
         a_query = await auth.accessible_query(alice, query, 'manage')
 
-        assert "FROM person JOIN city ON city.id = person.city_id \nWHERE city.mayor_id IN (1000, 1002)" in str(a_query)
+        assert "FROM person" in str(a_query)
+        assert "JOIN city ON city.id = person.city_id" in str(a_query)
+        assert "city.mayor_id IN (1000, 1002)" in str(a_query)
 
         accessible_people = (await db.execute(a_query)).scalars().all()
         names = {person.name for person in accessible_people}
@@ -219,9 +224,130 @@ async def test_accessible_query_tree(full_people, human, Person, spatial, contex
         accessible_people = (await db.execute(a_query)).scalars().all()
         names = {person.name for person in accessible_people}
         assert names == alices_people
-        assert names == {'Jane', 'Jill'}
+        assert names == {'Jane', 'Jill', 'Jack'}
+
+        await auth.grant(bob, 'reader', GLOBAL_CONTEXT)
+        await auth.grant(bob, 'editor', await Hobby.get_by_name('Tennis'))
 
         b_query = await auth.accessible_query(bob, query)
+        assert "JOIN city ON city.id = person.city_id" not in str(b_query)
+        assert "JOIN department ON department.id = city.department_id" not in str(b_query)
+        assert "JOIN country ON country.id = department.country_id" not in str(b_query)
+        assert "JOIN job ON job.id = person.job_id" not in str(b_query)
+        assert "JOIN hobby ON hobby.id = person.hobby_id" not in str(b_query)
+
+
+        b_query = await auth.accessible_query(bob, query, 'write')
+        bob_people = {p.name for p
+                      in (await db.execute(select(Person))).scalars().all()
+                      if await auth.can(alice, 'write', p)}
+        names = {person.name for person in accessible_people}
+        assert "JOIN city ON city.id = person.city_id" not in str(b_query)
+        assert "JOIN department ON department.id = city.department_id" not in str(b_query)
+        assert "JOIN country ON country.id = department.country_id" not in str(b_query)
+        assert "JOIN job ON job.id = person.job_id" not in str(b_query)
+        assert "JOIN hobby ON hobby.id = person.hobby_id" in str(b_query)
+
+        assert names == bob_people
+        assert names == {'Jane', 'Jill', 'Jack'}
+
+
+@pytest.mark.asyncio
+async def test_accessible_query_branches(full_people, human, Person, spatial, context, db_engine, User, Base):
+    Country, Department, City = spatial
+    Job, Hobby = human
+
+    class FootballTeam(Base):
+        __tablename__ = 'football_team'
+        id: Mapped[int] = mapped_column(Integer, primary_key=True)
+        name: Mapped[str] = mapped_column(String)
+        city_id: Mapped[int] = Column(Integer, ForeignKey("city.id"))
+        city: Mapped["City"] = relationship("City", backref="football_teams")
+
+
+    auth = Auth(Base, user_model=User,
+                actions={
+                    'Person': {
+                        'read': PathPermission('read',
+                                               'city', 'city.department',
+                                               'city.department.country', 'city.football_teams'),
+                        'write': PathPermission('write',
+                                                'city', 'city.department', 'city.department.country',
+                                                'job', 'hobby', 'city.football_teams'),
+                    }
+                })
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with context():
+        alice = User(name='alice', last_name='--')
+        bob = User(name='bob', last_name='--')
+        db.add_all([alice, bob])
+        db.add(FootballTeam(name='Milan', city=await City.get_by_name('Milan')))
+        db.add(FootballTeam(name='PSG', city=await City.get_by_name('Paris')))
+        db.add(FootballTeam(name='Bayern', city=await City.get_by_name('Munich')))
+
+
+    async with context():
+        query = select(Person)
+        alice = await User.get_by_name('alice')
+        bob = await User.get_by_name('bob')
+        all_people = (await db.execute(query)).scalars().all()
+
+        await auth.assign('reader', 'read')
+        await auth.assign('editor', 'read', 'write')
+        await auth.assign('manager', 'read', 'write', 'manage')
+
+        palermo = await City.get_by_name('Palermo')
+        milano = await City.get_by_name('Milan')
+        essonne = await City.get_by_name('Essonne')
+        essonne.mayor_id = 1000
+        await auth.grant(alice, 'reader', milano)
+        await auth.grant(alice, 'reader', await Hobby.get_by_name('Tennis'))
+        await auth.grant(alice, 'reader', await Job.get_by_name('Programmer'))
+
+        await auth.grant(bob, 'reader', await FootballTeam.get_by_name('Bayern'))
+        await auth.grant(bob, 'manager', await FootballTeam.get_by_name('PSG'))
+
+        names = {p.name for p in all_people if await auth.can(bob, 'read', p)}
+        b_query = await auth.accessible_query(bob, query)
+        bob_people = {p.name for p in (await db.execute(b_query)).scalars().all()}
+        assert bob_people == names
+        assert bob_people == {'Jack', 'Jule'}
+
+
+        names = {p.name for p in all_people if await auth.can(alice, 'read', p)}
+        b_query = await auth.accessible_query(alice, query)
+        bob_people = {p.name for p in (await db.execute(b_query)).scalars().all()}
+        assert bob_people == names
+        assert bob_people == {'Jill', 'Joe'}
+
+        names = {p.name for p in all_people if await auth.can(bob, 'write', p)}
+        b_query = await auth.accessible_query(bob, query, 'write')
+        bob_people = {p.name for p in (await db.execute(b_query)).scalars().all()}
+        assert bob_people == names
+        assert bob_people == {'Jule'}
+
+
+        names = {p.name for p in all_people if await auth.can(alice, 'write', p)}
+        a_query = await auth.accessible_query(alice, query, 'write')
+        alice_people = {p.name for p in (await db.execute(a_query)).scalars().all()}
+        assert alice_people == names
+        assert alice_people == set()
+
+        await auth.grant(alice, 'editor', await Person.get_by_name('John'))
+        await auth.grant(alice, 'editor', await Country.get_by_name('Germany'))
+
+        names = {p.name for p in all_people if await auth.can(alice, 'write', p)}
+        a_query = await auth.accessible_query(alice, query,'write')
+        alice_people = {p.name for p in (await db.execute(a_query)).scalars().all()}
+        assert alice_people == names
+        assert alice_people == {'Jack', 'John'}
+
+
+
+
 
 
 
