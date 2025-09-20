@@ -391,7 +391,8 @@ class Auth:
             select(rolegrant.c.context_table, rolegrant.c.context_id)
             .where(
                 (rolegrant.c.usergroup_id.in_(group_ids)) &
-                (rolegrant.c.role_id.in_(role_ids))
+                (rolegrant.c.role_id.in_(role_ids)) &
+                (rolegrant.c.context_table != 'global')
             )
         )
 
