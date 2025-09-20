@@ -142,8 +142,11 @@ def inverted_properties(schema: Dict[str, List[str]], registry: sqlalchemy.orm.d
             ret.append(invert_relation(mapper.relationships[property_name]))
     return {tab: {x[1] for x in grp} for tab, grp in groupby(sorted(ret), itemgetter(0))}
 
+@memoize_args
 def table_to_class(Base, table: str):
     """Resolve any table or table name to a `DeclarativeBase` model class."""
+    if table == 'global':
+        return None
     if isinstance(table, Table):
         return next(iter(mapper.class_
                          for mapper in Base.registry.mappers

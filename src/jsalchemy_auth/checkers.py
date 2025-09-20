@@ -51,29 +51,33 @@ class PathPermission(PermissionChecker):
 
     async def joins(self, group_ids: Set[int], target: DeclarativeBase) -> List[RelationshipProperty]:
         permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
-        yielded = set()
+        ret = []
         if permitted_contexts:
             models = {context.model for context in permitted_contexts}
-            for path in self.paths:
+            for path in all_paths(self.paths):
                 # traverse all paths to find the tables where permissions are assigned
                 partial_path = []
                 for prop in class_traverse(target, path):
                     partial_path.append(prop)
                     if prop.entity.class_ in models:
                         for p in partial_path:
-                            if p not in yielded:
-                                yield p
-                                yielded.add(p)
+                            if p not in ret:
+                                ret.append(p)
+        return ret
 
     async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase, permission_name: str = 'read') -> List:
         permitted = {c.model: c.ids for c in await self.auth.contexts_by_permission(group_ids, self.permission)}
-        return or_(*(
-            model.id.in_(permitted[model])
+        items = [model.id.in_(permitted[model])
             for path in all_paths(self.paths)
                 for model in (
                     self.auth.to_class(a.target)
                     for a in class_traverse(target, path))
-                if model in permitted))
+                if model in permitted]
+        if target in permitted:
+            items.append(target.id.in_(permitted[target]))
+        if items:
+            return or_(*items)
+        return []
 
 class OwnerPermission(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
@@ -89,14 +93,18 @@ class OwnerPermission(PermissionChecker):
                 return True
         return False
 
-    async def joins(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List[RelationshipProperty]:
-        for prop in class_traverse(target, '.'.join(self.path.split('.')[:-1])):
-            yield prop
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase ) -> List[RelationshipProperty]:
+        return [prop for prop in class_traverse(target, '.'.join(self.path.split('.')[:-1]))]
+
+    def _where_condition(self, attribute, user, group_ids):
+        return attribute == user.id
 
     async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
-        return tuple(class_traverse(target, self.path))[-1].class_attribute == user.id
+        return self._where_condition(
+            tuple(class_traverse(target, self.path))[-1].class_attribute,
+            user, group_ids)
 
-class GroupOwnerPermission(PermissionChecker):
+class GroupOwnerPermission(OwnerPermission):
     def __init__(self, on: str, auth: "Auth"=None):
         """check if the user id is the same as the object id following the path."""
         self.auth = auth
@@ -110,12 +118,8 @@ class GroupOwnerPermission(PermissionChecker):
                 return True
         return False
 
-    async def joins(self, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List[RelationshipProperty]:
-        for prop in class_traverse(target, '.'.join(self.path.split('.')[:-1])):
-            yield prop
-
-    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase , permission_name: str='read') -> List:
-        return tuple(class_traverse(target, self.path))[-1].class_attribute.in_(group_ids)
+    def _where_condition(self, attribute, user, group_ids):
+        return attribute.in_(group_ids)
 
 class GlobalPermission(PermissionChecker):
 
@@ -133,11 +137,11 @@ class GlobalPermission(PermissionChecker):
                 return True
         return False
 
-    def joins(self, user: UserMixin, query: Select, permission_name: str='read'):
-        return query
+    async def joins(self, user: UserMixin, query: Select):
+        return [None]
 
     def where(self, user: UserMixin, query: Select, permission_name: str='read'):
-        return query
+        return None
 
 class OrPermission(PermissionChecker):
     def __init__(self, *permission_checker):
@@ -160,9 +164,7 @@ class OrPermission(PermissionChecker):
         return False
 
     async def joins(self, user: UserMixin, target: DeclarativeBase, permission_name: str='read'):
-        for checker in self.checkers:
-            async for join in checker.joins(user, target, permission_name):
-                yield join
+        return [prop for checker in self.checkers for prop in await checker.joins(user, target)]
 
 class AndPermission(PermissionChecker):
     def __init__(self, *permission_checker):
