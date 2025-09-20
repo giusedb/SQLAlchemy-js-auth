@@ -398,6 +398,21 @@ class Auth:
         return {ContextSet(self.to_class(table), tuple(map(itemgetter(1), grp)))
                 for table, grp in groupby(sorted(result.fetchall()), itemgetter(0))}
 
+    async def object_with_permission(self, user: UserMixin, permission: str):
+        """finds every object the user has the permission to."""
+        contexts = await self.contexts_by_permission(user, permission)
+        ret = set()
+        for context in contexts:
+            if isinstance(context, ContextSet):
+                ret.update((await session.execute(
+                    select(context.model)
+                    .where(context.model.id.in_(context.ids)))).scalars().all())
+            else:
+                ret.add((await session.
+                    select(context.model)
+                    .where(context.model.id == context.id)).scalar_one_or_none())
+        return ret
+
     async def accessible_query(self, user: UserMixin, query: Select, action: str='read', false_=None):
         """Returns a query filtered by the user's permissions."""
         table = get_target_table(query)
