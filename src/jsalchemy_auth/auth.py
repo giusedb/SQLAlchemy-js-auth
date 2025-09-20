@@ -11,7 +11,7 @@ from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, sele
 from jsalchemy_web_context.cache import redis_cache, request_cache
 from .utils import Context, to_context, inverted_properties, ContextSet, table_to_class, get_target_table
 from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
-from .checkers import PathPermission, GlobalPermission
+from .checkers import Path, Global
 
 
 class PermissionGrantError(Exception):
@@ -21,7 +21,7 @@ class PermissionGrantError(Exception):
 GLOBAL_CONTEXT = Context(id=0, model=None)
 
 class Auth:
-    _all_paths: Dict[str, PathPermission] = {}
+    _all_paths: Dict[str, Path] = {}
     _propagation_schema: Dict[str, List[str]] = {}
     _inv_propagation_schema: Dict[str, List[str]] = {}
 
@@ -349,7 +349,7 @@ class Auth:
             self.actions[model_name] = {}
         if action not in self.actions[model_name]:
             paths = self._explode_partial_schema(model_name)
-            perm = GlobalPermission(action, auth=self) | PathPermission(action, auth=self, *paths)
+            perm = Global(action, auth=self) | Path(action, auth=self, *paths)
             self.actions[model_name][action] = perm
         return self.actions[model_name][action]
 

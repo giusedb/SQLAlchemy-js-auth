@@ -61,8 +61,8 @@ def context(session):
 def Base():
     """Create a SQLAlchemy declarative base class."""
     class Base(AsyncAttrs, DeclarativeBase):
-        id: MappedColumn[int] = Column(Integer, primary_key=True)
-        name: MappedColumn[str] = Column(String(150), nullable=False)
+        id: MappedColumn[int] = mapped_column(Integer, primary_key=True)
+        name: MappedColumn[str] = mapped_column(String(150), nullable=False)
 
         def __repr__(self):
             return f"{self.__class__.__name__}(name={self.name})"

@@ -68,7 +68,7 @@ def test_explode_partial_schema(Person, Base):
 # @pytest.mark.skip(reason="Disable due to the caching")
 @pytest.mark.asyncio
 async def test_actions(context, spatial, db_engine, User, Base):
-    from jsalchemy_auth.checkers import PathPermission
+    from jsalchemy_auth.checkers import Path
 
     Country, Department, City = spatial
 
@@ -77,13 +77,13 @@ async def test_actions(context, spatial, db_engine, User, Base):
         user_model=User,
         actions={
             'Country': {
-                'read': PathPermission('read'),
+                'read': Path('read'),
             },
             'Department': {
-                'read': PathPermission('read', 'country'),
+                'read': Path('read', 'country'),
             },
             'City': {
-                'read': PathPermission('read', 'department.country'),
+                'read': Path('read', 'department.country'),
             }
         },
     )
@@ -138,7 +138,7 @@ async def test_actions(context, spatial, db_engine, User, Base):
 
 @pytest.mark.asyncio
 async def test_actions_2(context, spatial, db_engine, User, Base):
-    from jsalchemy_auth.checkers import PathPermission
+    from jsalchemy_auth.checkers import Path
 
     Country, Department, City = spatial
 
@@ -147,13 +147,13 @@ async def test_actions_2(context, spatial, db_engine, User, Base):
         user_model=User,
         actions={
             'Country': {
-                'read': PathPermission('read'),
+                'read': Path('read'),
             },
             'Department': {
-                'read': PathPermission('read', 'country'),
+                'read': Path('read', 'country'),
             },
             'City': {
-                'read': PathPermission('read', 'department'),
+                'read': Path('read', 'department'),
             }
         },
     )

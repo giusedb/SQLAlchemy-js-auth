@@ -11,13 +11,13 @@ class PermissionChecker:
     auth: "Auth" = None
 
     def __or__(self, other):
-        return OrPermission(self, other)
+        return Or(self, other)
 
     def __and__(self, other):
-        return AndPermission(self, other)
+        return And(self, other)
 
     def __invert__(self):
-        return NotPermission(self)
+        return Not(self)
 
     def __repr__(self):
         return f"- [{self.__class__.__name__}] -"
@@ -30,7 +30,7 @@ class PermissionChecker:
         """add the where clause to the ``query`` to check the permission that the ``user`` has."""
         raise NotImplementedError
 
-class PathPermission(PermissionChecker):
+class Path(PermissionChecker):
     def __init__(self,permission: str, *path: List[str], auth: "Auth"=None):
         """Check if the user has the permission for the object following the path."""
         self.permission = permission
@@ -77,9 +77,9 @@ class PathPermission(PermissionChecker):
             items.append(target.id.in_(permitted[target]))
         if items:
             return or_(*items)
-        return []
+        return None
 
-class OwnerPermission(PermissionChecker):
+class Owner(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
         """check if the user id is the same as the object id following the path."""
         self.auth = auth
@@ -104,7 +104,7 @@ class OwnerPermission(PermissionChecker):
             tuple(class_traverse(target, self.path))[-1].class_attribute,
             user, group_ids)
 
-class GroupOwnerPermission(OwnerPermission):
+class Group(Owner):
     def __init__(self, on: str, auth: "Auth"=None):
         """check if the user id is the same as the object id following the path."""
         self.auth = auth
@@ -121,7 +121,7 @@ class GroupOwnerPermission(OwnerPermission):
     def _where_condition(self, attribute, user, group_ids):
         return attribute.in_(group_ids)
 
-class GlobalPermission(PermissionChecker):
+class Global(PermissionChecker):
 
     def __init__(self, permission: str, auth: "Auth"=None):
         self.auth = auth
@@ -143,7 +143,7 @@ class GlobalPermission(PermissionChecker):
     def where(self, user: UserMixin, query: Select, permission_name: str='read'):
         return None
 
-class OrPermission(PermissionChecker):
+class Or(PermissionChecker):
     def __init__(self, *permission_checker):
         self.checkers = permission_checker
 
@@ -166,7 +166,7 @@ class OrPermission(PermissionChecker):
     async def joins(self, user: UserMixin, target: DeclarativeBase, permission_name: str='read'):
         return [prop for checker in self.checkers for prop in await checker.joins(user, target)]
 
-class AndPermission(PermissionChecker):
+class And(PermissionChecker):
     def __init__(self, *permission_checker):
         self.checkers = permission_checker
 
@@ -186,7 +186,7 @@ class AndPermission(PermissionChecker):
                 return False
         return True
 
-class NotPermission(PermissionChecker):
+class Not(PermissionChecker):
     def __init__(self, permission_checker: PermissionChecker):
         self.checker = permission_checker
 

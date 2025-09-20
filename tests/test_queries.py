@@ -4,7 +4,7 @@ from sqlalchemy.orm import RelationshipProperty, ColumnProperty, mapped_column, 
 
 from jsalchemy_auth import Auth
 from jsalchemy_auth.auth import GLOBAL_CONTEXT
-from jsalchemy_auth.checkers import PathPermission, OwnerPermission, GroupOwnerPermission
+from jsalchemy_auth.checkers import Path, Owner, Group, Global
 from jsalchemy_web_context import db
 
 
@@ -52,9 +52,9 @@ async def test_accessible_query(full_people, Person, spatial, context, db_engine
     auth = Auth(Base, user_model=User,
                 actions={
                     'Person': {
-                        'read': PathPermission('read', 'city'),
-                        'write': OwnerPermission(on='city.mayor_id'),
-                        'manage': GroupOwnerPermission(on='city.mayor_id')
+                        'read': Path('read', 'city'),
+                        'write': Owner(on='city.mayor_id'),
+                        'manage': Group(on='city.mayor_id')
                     }
                 })
 
@@ -137,9 +137,9 @@ async def test_accessible_query_tree(full_people, human, Person, spatial, contex
     auth = Auth(Base, user_model=User,
                 actions={
                     'Person': {
-                        'read': PathPermission('read',
+                        'read': Path('read',
                                                'city', 'city.department', 'city.department.country'),
-                        'write': PathPermission('write',
+                        'write': Path('write',
                                                 'city', 'city.department', 'city.department.country', 'job', 'hobby'),
                     }
                 })
@@ -268,10 +268,10 @@ async def test_accessible_query_branches(full_people, human, Person, spatial, co
     auth = Auth(Base, user_model=User,
                 actions={
                     'Person': {
-                        'read': PathPermission('read',
+                        'read': Path('read',
                                                'city', 'city.department',
                                                'city.department.country', 'city.football_teams'),
-                        'write': PathPermission('write',
+                        'write': Path('write',
                                                 'city', 'city.department', 'city.department.country',
                                                 'job', 'hobby', 'city.football_teams'),
                     }
