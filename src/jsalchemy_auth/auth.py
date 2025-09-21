@@ -21,6 +21,12 @@ class PermissionGrantError(Exception):
 GLOBAL_CONTEXT = Context(id=0, model=None)
 
 class Auth:
+    """Manages authorization and permission logic for users, groups, roles, and permissions.
+
+    This class handles the configuration and querying of access control rules,
+    including propagation schemas, role-to-permission mappings, and user/group
+    permission checks. """
+
     _all_paths: Dict[str, Path] = {}
     _propagation_schema: Dict[str, List[str]] = {}
     _inv_propagation_schema: Dict[str, List[str]] = {}
@@ -65,7 +71,10 @@ class Auth:
 
 
     def _define_tables(self, Base: DeclarativeBase):
-        """Create all database tables for the models."""
+        """Dynamically define SQLAlchemy models for User, Group, Role, and Permission.
+
+        Args:
+            Base (DeclarativeBase): The SQLAlchemy base class to use for defining models."""
         global membership, rolegrant, role_permission
         from jsalchemy_auth.models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin
         for model, mixin in [('user_model', UserMixin), ('group_model', UserGroupMixin),
@@ -147,14 +156,23 @@ class Auth:
     @request_cache()
     @redis_cache()
     async def _perm_name_ids(self) -> Dict[str, int]:
-        """Return the full translation of permission names to ids."""
+        """Retrieve a mapping of permission names to their database IDs.
+
+        Returns:
+            dict: A dictionary mapping permission names to IDs."""
         return {row.name: row.id
                 for row in await session.execute(
                     select(self.permission_model.name,
                            self.permission_model.id))}
 
     async def _resolve_permission(self, permission_name: str) -> Set[int]:
-        """Find all role ids associated with a permission name."""
+        """Find all role IDs associated with a given permission name.
+
+        Args:
+            permission_name (str): The name of the permission to resolve.
+
+        Returns:
+            set[int]: A set of role IDs associated with the permission."""
         ref = await self._perms_to_roles()
         if permission_name not in ref:
             return set()
@@ -163,7 +181,10 @@ class Auth:
     @request_cache()
     @redis_cache()
     async def _global_permissions(self) -> Set[str]:
-        """Find all global permissions and return their names."""
+        """Retrieve all globally scoped permissions.
+
+        Returns:
+            set[str]: A set of global permission names."""
         result = await session.execute(
             select(self.permission_model.name).where(
                 self.permission_model.is_global == True
@@ -172,7 +193,14 @@ class Auth:
         return set(result.scalars())
 
     async def _has_any_role(self, group_ids: Set[int], role_ids: Set[int]) -> bool:
-        """Check if any of the group_ids have any of the role_ids."""
+        """Check if any of the provided groups have any of the specified roles.
+
+        Args:
+            group_ids (set[int]): IDs of user groups.
+            role_ids (set[int]): IDs of roles to check.
+
+        Returns:
+            bool: True if any group has any of the specified roles."""
         return bool((await session.execute(
             rolegrant.select().where(
                 (rolegrant.c.usergroup_id.in_(group_ids)) &
@@ -186,7 +214,14 @@ class Auth:
         return inverted_properties(self.propagation_schema)
 
     def _explode_partial_schema(self, table: str, depth: int = 0) -> Set[str]:
-        """Follow the schema provided and build all paths from a model class."""
+        """Traverse the schema to build all possible paths from a model class.
+
+        Args:
+            table (str): The name of the target table.
+            depth (int): Depth to explore (used in recursive traversal).
+
+        Returns:
+            set[str]: Set of all paths derived from the schema."""
 
         def tree_explore(node: str) -> Set[str]:
             """
@@ -415,7 +450,16 @@ class Auth:
         return ret
 
     async def accessible_query(self, user: UserMixin, query: Select, action: str='read', false_=None):
-        """Returns a query filtered by the user's permissions."""
+        """Modify a query to filter results based on the user's permissions.
+
+        Args:
+            user (UserMixin): The user whose permissions to check.
+            query (Select): The SQLAlchemy select query to modify.
+            action (str): The action being performed (e.g., 'read', 'write').
+            false_ (Any, optional): Value to return if no permissions are granted.
+
+        Returns:
+            Select: The modified query filtered by user permissions."""
         table = get_target_table(query)
         target = self.to_class(table)
         checker = self._action_checker(action, target.__name__)
