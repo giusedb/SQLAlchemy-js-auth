@@ -345,6 +345,97 @@ async def test_accessible_query_branches(full_people, human, Person, spatial, co
         assert alice_people == names
         assert alice_people == {'Jack', 'John'}
 
+@pytest.mark.asyncio
+async def test_accessible_query_inverted(Base, full_filesystem, User, db_engine, context):
+
+    build_classes, put_data = full_filesystem
+
+    auth = Auth(Base, user_model=User,
+                actions={
+                    'MountPoint': {
+                        'read': Global('read'),
+                    },
+                    'Folder': {
+                        'read': Path('read', 'mountpoint', 'parent'),
+                        'add-tag': Path('add-tag', 'mountpoint', 'parent'),
+                    },
+                    'File': {
+                        'read': Path('read', 'folder'),
+                        'add-tag': Path('add-tag', 'folder'),
+                    },
+                    'Tag': {
+                        'read': Path('read', 'files', 'folders'),
+                    },
+                })
+
+    classes = build_classes()
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    MountPoint, Folder, File, Tag = await put_data(classes)
+
+
+
+    async with context():
+        alice = User(name='alice', last_name='A', id=1)
+        bob = User(name='bob', last_name='B', id=2)
+        root = User(name='root', last_name='C', id=3)
+
+        db.add_all([alice, bob, root])
+
+    async with context():
+        await auth.assign('reader', 'read')
+        await auth.assign('editor', 'read', 'write')
+        await auth.assign('manager', 'read', 'write', 'traverse')
+
+        alice = await User.get_by_name('alice')
+        bob = await User.get_by_name('bob')
+        root = await User.get_by_name('root')
+
+        users = {user.name: user for user in (alice, bob, root)}
+
+        home = await Folder.get_by_name('home')
+        for home in await home.awaitable_attrs.children:
+            await auth.grant(users[home.name], 'manager', home)
+
+        await auth.grant(root, 'manager', GLOBAL_CONTEXT)
+
+        all_folders = (await db.execute(select(Folder))).scalars().all()
+        all_files = (await db.execute(select(File))).scalars().all()
+        all_tags = (await db.execute(select(Tag))).scalars().all()
+        all_mount_points = (await db.execute(select(MountPoint))).scalars().all()
+        folder_query = select(Folder)
+
+        alices_read_folders = {await f.path for f in all_folders if await auth.can(alice, 'read', f)}
+        bob_read_folders = {await f.path for f in all_folders if await auth.can(bob, 'read', f)}
+
+        alice_accessible_folders = await auth.accessible_query(alice, folder_query, 'read')
+        bob_accessible_folders = await auth.accessible_query(bob, select(Folder), 'read')
+
+        assert alices_read_folders == {await f.path for f in (await db.execute(alice_accessible_folders)).scalars()}
+        assert bob_read_folders == {await f.path for f in (await db.execute(bob_accessible_folders)).scalars()}
+
+        alice_read_files = {await f.path for f in all_files if await auth.can(alice, 'read', f)}
+        bob_read_files = {await f.path for f in all_files if await auth.can(bob, 'read', f)}
+
+        alice_accessible_files = await auth.accessible_query(alice, select(File), 'read')
+        bob_accessible_files = await auth.accessible_query(bob, select(File), 'read')
+
+        assert alice_read_files == {await f.path for f in (await db.execute(alice_accessible_files)).scalars()}
+        assert bob_read_files == {await f.path for f in (await db.execute(bob_accessible_files)).scalars()}
+
+        alice_read_tags = {t.name for t in all_tags if await auth.can(alice, 'read', t)}
+        bob_read_tags = {t.name for t in all_tags if await auth.can(bob, 'read', t)}
+
+        alice_accessible_tags = await auth.accessible_query(alice, select(Tag), 'read')
+        bob_accessible_tags = await auth.accessible_query(bob, select(Tag), 'read')
+
+        assert alice_read_tags == {t.name for t in (await db.execute(alice_accessible_tags)).scalars()}
+        assert bob_read_tags == {t.name for t in (await db.execute(bob_accessible_tags)).scalars()}
+
+
+
 
 
 

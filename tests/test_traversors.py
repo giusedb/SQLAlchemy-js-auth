@@ -15,7 +15,7 @@ async def test_upper_traverse(context, spatial):
     from jsalchemy_auth.traversers import traverse
     async with context() as ctx:
         city = await City.get_by_name('Milan')
-        countries = {item async for item in traverse(city, 'department.country.name')}
+        countries = {item async for item in traverse(to_context(city), 'department.country.name')}
 
         assert ('Italy',) in countries
         assert ContextSet(Country, (1,)) in countries
@@ -29,9 +29,9 @@ async def test_cached_traversor(context, spatial):
 
     async with context():
         city = await db.scalar(select(City).where(City.name == 'Milan'))
-        countries = {item async for item in traverse(city, 'department.country.name')}
+        countries = {item async for item in traverse(to_context(city), 'department.country.name')}
 
-        countries_from_cache = {item async for item in traverse(city, 'department.country.name')}
+        countries_from_cache = {item async for item in traverse(to_context(city), 'department.country.name')}
         assert countries == countries_from_cache
 
 
@@ -42,7 +42,7 @@ async def test_lower_traverse(context, spatial):
     from jsalchemy_auth.traversers import traverse
     async with context():
         france = await db.scalar(select(Country).where(Country.name == 'France'))
-        cts = [item async for item in traverse(france, 'departments.cities.name', start=3)]
+        cts = [item async for item in traverse(to_context(france), 'departments.cities.name', start=3)]
         cities = reduce(set.union, cts, set())
 
         assert 'Paris' in cities
@@ -50,7 +50,7 @@ async def test_lower_traverse(context, spatial):
 
         cts = []
 
-        async for item in traverse(france, 'departments.cities.name', start=2):
+        async for item in traverse(to_context(france), 'departments.cities.name', start=2):
             cts.append(item)
         cities = reduce(set.union, cts, set())
         assert {'Essonne', 'Paris', 'Annecy', 'Lyon'}.issubset(cities)
@@ -64,12 +64,12 @@ async def test_up_and_down(context, spatial):
     async with context():
         city = await db.scalar(select(City).where(City.name == 'Milan'))
 
-        same_department = {item async for item in traverse(city, 'department.cities.name')}
+        same_department = {item async for item in traverse(to_context(city), 'department.cities.name')}
         cities = reduce(set.union, (set(x) for x in same_department if type(x) == tuple), set())
         assert 'Milan' in cities
         assert 'Bergamo' in cities
 
-        same_department = {item async for item in traverse(city, 'department.cities.name', start=2)}
+        same_department = {item async for item in traverse(to_context(city), 'department.cities.name', start=2)}
         cities = reduce(set.union, (set(x) for x in same_department if type(x) == tuple), set())
         assert {'Milan', 'Bergamo'} == cities
 
@@ -122,18 +122,18 @@ async def test_lower_traverse_start(context, spatial):
     async with context() as ctx:
         france = await Country.get_by_name('France')
         cities = reduce(set.union,
-                        [set(item) async for item in traverse(france, 'departments.cities.name', start=3)],
+                        [set(item) async for item in traverse(to_context(france), 'departments.cities.name', start=3)],
                         set())
         assert {'Paris', 'Lyon', 'Annecy', 'Essonne'} == cities
 
-        item_types = {type(item) async for item in traverse(france, 'departments.cities.name')}
+        item_types = {type(item) async for item in traverse(to_context(france), 'departments.cities.name')}
         assert {ContextSet, tuple} == item_types
 
-        item_types = {type(await to_object(i)) async for items in traverse(france, 'departments.cities') for i in items}
+        item_types = {type(await to_object(i)) async for items in traverse(to_context(france), 'departments.cities') for i in items}
         assert {Department, City} == item_types
         #
         cities = [Context(City, x) for x in range(1, 10)]
-        countries = {c for city in cities async for c in traverse(city, 'department.country.name', 3) }
+        countries = {c for city in cities async for c in traverse(to_context(city), 'department.country.name', 3) }
         assert {'France', 'Germany', 'Italy'} == set(chain.from_iterable(countries))
 
 def test_treefy_paths():
@@ -156,11 +156,11 @@ async def test_tree_traverse(context, spatial, full_people, Person):
     async with context():
         italy = await Country.get_by_name('Italy')
         cities = {x async for x in flatten(
-            (x async for x in tree_traverse(italy, treefy_paths('departments.cities.name'), start=3)))}
+            (x async for x in tree_traverse(to_context(italy), treefy_paths('departments.cities.name'), start=3)))}
         assert cities == {'Catania', 'Milan', 'Palermo', 'Bergamo'}
 
         activities = [x async for x in flatten(tree_traverse(
-            italy,
+            to_context(italy),
             treefy_paths('departments.cities.people.job.name', 'departments.cities.people.hobby.name'), start=5))]
         assert set(activities) == {'Tennis', 'Engineer', 'Sales', 'Football', 'Basketball', 'Programmer', 'Designer'}
 

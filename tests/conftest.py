@@ -3,9 +3,10 @@
 # pylint: disable=import-outside-toplevel
 import os
 
+import pytest
 import pytest_asyncio
 from pytest import fixture
-from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select, Select
+from sqlalchemy import create_engine, Column, Integer, ForeignKey, String, select, Select, Table
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import Session, relationship, MappedColumn, DeclarativeBase, mapped_column, Mapped
 
@@ -363,3 +364,122 @@ async def users(auth, roles, context):
         await db.commit()
 
     return users
+
+@pytest.fixture
+def filesystem(Base, User):
+
+    def wrapper():
+        class MountPoint(Base):
+            __tablename__ = "mountpoints"
+
+
+        class Folder(Base):
+            __tablename__ = "folders"
+            id: Mapped[int] = Column(Integer, primary_key=True)
+            parent_id: Mapped[int] = Column(Integer, ForeignKey("folders.id"), nullable=True)
+            parent: Mapped["Folder"] = relationship("Folder", remote_side=[id], backref="children")
+            mountpoint_id: Mapped[int] = Column(Integer, ForeignKey("mountpoints.id"), nullable=True)
+            mountpoint: Mapped["MountPoint"] = relationship("MountPoint", backref="folders")
+            owner_id: Mapped[int] = Column(Integer, ForeignKey("users.id"), nullable=True)
+            group_id: Mapped[int] = Column(Integer, ForeignKey("groups.id"), nullable=True)
+            # group: Mapped["UserGroup"] = relationship("UserGroup", backref="folders")
+
+            @property
+            def path(self):
+                async def _path():
+                    ret = []
+                    f = self
+                    while True:
+                        ret.append(f.name)
+                        if f.parent_id is None:
+                            break
+                        f = await f.awaitable_attrs.parent
+                    return '/'.join(reversed(ret))
+                return _path()
+
+        class File(Base):
+            __tablename__ = "files"
+            folder_id: Mapped[int] = Column(Integer, ForeignKey("folders.id"))
+            folder: Mapped["Folder"] = relationship("Folder", backref="files")
+            owner_id: Mapped[int] = Column(Integer, ForeignKey("users.id"))
+            owner: Mapped["User"] = relationship("User", backref="files")
+            group_id: Mapped[int] = Column(Integer, ForeignKey("groups.id"))
+            # group: Mapped["UserGroup"] = relationship("UserGroup", backref="files")
+
+            @property
+            def path(self):
+                async def _path():
+                    ret = [self.name]
+                    f = await self.awaitable_attrs.folder
+                    while True:
+                        ret.append(f.name)
+                        if f.parent_id is None:
+                            break
+                        f = await f.awaitable_attrs.parent
+                    return '/'.join(reversed(ret))
+                return _path()
+
+
+        tagging = Table(
+            "tagging",
+            Base.metadata,
+            Column("tag_id", Integer, ForeignKey("tags.id")),
+            Column("file_id", Integer, ForeignKey("files.id")),
+            Column("folder_id", Integer, ForeignKey("folders.id")),
+        )
+
+        class Tag(Base):
+            __tablename__ = "tags"
+
+            files = relationship("File", secondary=tagging, backref="tags")
+            folders = relationship("Folder", secondary=tagging, backref="tags")
+
+        return MountPoint, Folder, File, Tag
+    return wrapper
+
+@pytest.fixture
+def full_filesystem(context, filesystem):
+
+
+    async def build(classes):
+        MountPoint, Folder, File, Tag = classes
+
+        async with context():
+            root = MountPoint(name="root")
+            nfs = Folder(name="nfs", mountpoint=root)
+
+            root_folder = Folder(name="", mountpoint=root, owner_id=3, group_id=3)
+            dev = Folder(name="dev", parent=root_folder, owner_id=3, group_id=3)
+            home = Folder(name="home", parent=root_folder, owner_id=3, group_id=3)
+            alice = Folder(name="alice", parent=home, owner_id=1, group_id=1)
+            bob = Folder(name="bob", parent=home, owner_id=2, group_id=2)
+            db.add_all([root, nfs, root_folder, dev, home, alice, bob])
+            for owner_id, home in enumerate((alice, bob), 1):
+                desktop = Folder(name="Desktop", parent=home, owner_id=owner_id, group_id=owner_id)
+                documents = Folder(name="Documents", parent=home, owner_id=owner_id, group_id=owner_id)
+
+                read_me = File(name="README.md", folder=desktop, owner_id=owner_id, group_id=owner_id)
+                backup = File(name="backup.zip", folder=documents, owner_id=owner_id, group_id=owner_id)
+                avatar = File(name="avatar.png", folder=desktop, owner_id=owner_id, group_id=owner_id)
+                bill = File(name="bill.pdf", folder=documents, owner_id=owner_id, group_id=owner_id)
+
+                db.add_all([desktop, documents, read_me, backup, backup, bill])
+                await db.flush()
+
+                impoartant = Tag(name=f"important {home.name}")
+                to_print = Tag(name=f"to print {home.name}")
+                ready_to_send = Tag(name=f"ready to send {home.name}")
+
+                impoartant.files.append(read_me)
+                to_print.files.append(read_me)
+                to_print.files.append(bill)
+                ready_to_send.files.append(backup)
+
+                db.add_all([desktop, documents, read_me, backup])
+        return classes
+
+    return filesystem, build
+
+
+
+

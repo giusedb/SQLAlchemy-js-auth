@@ -421,10 +421,10 @@ class Auth:
         checker = self._action_checker(action, target.__name__)
         group_ids = await self._user_groups(user.id)
         joins = [join for join in await checker.joins(group_ids, target)]
-        if not joins:
-            return query.where(False)
         if None in joins:
             return query
+        if False in joins:
+            return query.where(False)
         for prop in joins:
             query = query.outerjoin(prop.class_attribute)
         return query.filter(await checker.where(user, group_ids, target))

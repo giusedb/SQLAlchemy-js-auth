@@ -164,3 +164,9 @@ def get_target_table(query):
     if len(ret) != 1:
         raise ValueError("Query has multiple tables")
     return ret.pop()
+
+def invert_prop(prop: RelationshipProperty):
+    if prop.back_populates:
+        return prop.entity.relationships[prop.back_populates]
+    if isinstance(prop.backref, str):
+        return prop.entity.relationships[prop.backref]

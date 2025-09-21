@@ -1,4 +1,4 @@
-from itertools import groupby
+from itertools import groupby, chain
 from operator import itemgetter
 from typing import List, Dict, Set, Iterable, AsyncIterable
 from marshal import dumps, loads
@@ -131,19 +131,39 @@ async def _referent(object: DeclarativeBase | Context | ContextSet, attribute: s
         return is_many, tuple(filter(bool, resolved.values()))
     return is_many, None
 
-def aggregate_references(*references: List[ContextSet | tuple]):
-    for type_, objects in groupby(sorted(references, key=lambda x: type(x).__name__), type):
-        if type_ is ContextSet:
-            yield ContextSet.join(*objects)
-        else:
-            yield tuple(x[0] for x in objects)
+def aggregate_references(references: List[ContextSet | tuple]):
+    # normalize items
+    normalized = [(x[0], x[1] if isinstance(x[1], (tuple, list, set)) else (x[1],)) for x in references]
+    return [ContextSet(model, tuple(set(chain.from_iterable(map(itemgetter(1), grp)))))
+            for model, grp in groupby(sorted(normalized, key=id), itemgetter(0))]
 
-async def traverse(object: DeclarativeBase, path: str, start:int =0, with_depth: bool = False):
-    """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
+def is_recursive(model: DeclarativeBase, attribute: str) -> bool:
+    if attribute not in model.__mapper__.relationships:
+        return False
+    prop = model.__mapper__.relationships[attribute]
+    return prop.target in prop.parent.tables
+
+async def recursive_traverse(object: DeclarativeBase, attribute: str):
     current = object
+    ret = set()
+    while True:
+        many, current = await _referent(current, attribute)
+        if not current:
+            break
+        ret.add(current)
+    if ret:
+        return True, ContextSet.join(*ret)
+    return False, None
+
+async def traverse(context: ContextSet | Context, path: str, start:int =0, with_depth: bool = False):
+    """Iterates across the database objects following the attribute-paths and yield all items from a starting form item `start`"""
+    current = context
     split_path = tuple(path.split("."))
     for n, p in enumerate(split_path, 1):
-        many, current = await _referent(current, p)
+        if is_recursive(current.model, p):
+            many, current = await recursive_traverse(current, p)
+        else:
+            many, current = await _referent(current, p)
         if current is None:
             break
         if start <= n:
@@ -187,3 +207,11 @@ def all_paths(tree: Dict[str, Dict | None]) -> List[str]:
         yield key
         if value:
             yield from (f"{key}.{path}" for path in all_paths(value))
+
+def invert_path(model: DeclarativeBase, path: str):
+    """Inverts a SQLAlchemy path."""
+    path = list(class_traverse(model, path))
+    path.reverse()
+    for step in path:
+        if isinstance(step, RelationshipProperty):
+            yield step.mapper.relationships[step.back_populates]

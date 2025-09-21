@@ -1,7 +1,10 @@
 import pytest
+from sqlalchemy import select
 
 from jsalchemy_auth import Auth
-from jsalchemy_auth.checkers import OwnerPermission
+from jsalchemy_auth.checkers import Owner, Path
+from jsalchemy_auth.traversers import traverse, invert_path
+from jsalchemy_auth.utils import Context, to_context
 from jsalchemy_web_context import db
 
 
@@ -9,11 +12,11 @@ from jsalchemy_web_context import db
 async def test_owner_permission(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
-        'City': {            'manage': OwnerPermission(on='mayor_id')},
+        'City': {            'manage': Owner(on='mayor_id')},
         'Department': {
-            'manage': OwnerPermission(on='president_id')},
+            'manage': Owner(on='president_id')},
         'Country': {
-            'manage': OwnerPermission(on='president_id')},
+            'manage': Owner(on='president_id')},
     }
 
     async with context():
@@ -42,11 +45,11 @@ async def test_owner_long(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
         'City': {
-            'manage': OwnerPermission(on='department.country.president_id')},
+            'manage': Owner(on='department.country.president_id')},
         'Department': {
-            'manage': OwnerPermission(on='country.president_id')},
+            'manage': Owner(on='country.president_id')},
         'Country': {
-            'manage': OwnerPermission(on='president_id')},
+            'manage': Owner(on='president_id')},
     }
 
     async with context():
@@ -73,14 +76,14 @@ async def test_owner_combined(Base, spatial, context, users, auth):
     Country, Department, City = spatial
     auth.actions={
         'City': {
-            'manage': OwnerPermission(on='mayor_id') |
-                      OwnerPermission(on='department.president_id') |
-                      OwnerPermission(on='department.country.president_id')},
+            'manage': Owner(on='mayor_id') |
+                      Owner(on='department.president_id') |
+                      Owner(on='department.country.president_id')},
         'Department': {
-            'manage': OwnerPermission(on='country.president_id') |
-                      OwnerPermission(on='president_id')},
+            'manage': Owner(on='country.president_id') |
+                      Owner(on='president_id')},
         'Country': {
-            'manage': OwnerPermission(on='president_id')},
+            'manage': Owner(on='president_id')},
     }
 
     async with context():
@@ -106,4 +109,78 @@ async def test_owner_combined(Base, spatial, context, users, auth):
         assert not await auth.can(charlie, 'manage', essonne)
         assert not await auth.can(alice, 'manage', essonne)
         assert await auth.can(bob, 'manage', essonne)
+
+@pytest.mark.asyncio
+async def test_user_recursive_path(Base, full_filesystem, User, db_engine, context):
+
+    build_classes, put_data = full_filesystem
+
+    auth = Auth(Base, user_model=User,
+                actions={
+                    'Folder': {
+                        'read': Path('read', 'parent'),
+                    },
+                    'File': {
+                        'read': Path('read', 'folder.parent.mountpoint'),
+                    }
+                })
+
+    classes = build_classes()
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    MountPoint, Folder, File, Tag = await put_data(classes)
+
+    async with context():
+        alice = User(name='alice', last_name='A', id=1)
+        bob = User(name='bob', last_name='B', id=2)
+        root = User(name='root', last_name='C', id=3)
+
+        db.add_all([alice, bob, root])
+
+    async with context():
+        await auth.assign('reader', 'read')
+
+        alice = await User.get_by_name('alice')
+        bob = await User.get_by_name('bob')
+        root = await User.get_by_name('root')
+        users = {u.name: u for u in [alice, bob, root]}
+        home_folder = await Folder.get_by_name('home')
+
+        for folder in await home_folder.awaitable_attrs.children:
+            if folder.name in users:
+                await auth.grant(users[folder.name], 'reader', folder)
+        await auth.grant(bob, 'reader', await MountPoint.get_by_name('root'))
+
+        all_folder = (await db.execute(select(Folder))).scalars().all()
+        all_files = (await db.execute(select(File))).scalars().all()
+
+        readable_files = {await file.path for file in all_files if await auth.can(alice, 'read', file)}
+
+        b_query = await auth.accessible_query(bob, select(File), 'read')
+        a_query = await auth.accessible_query(alice, select(File), 'read')
+
+
+        accessible_files = {await file.path for file in (await db.execute(a_query)).scalars().all()}
+        assert readable_files == accessible_files
+
+        readable_files = {await file.path for file in all_files if await auth.can(bob, 'read', file)}
+        b_query = await auth.accessible_query(bob, select(File), 'read')
+        accessible_files = {await file.path for file in (await db.execute(b_query)).scalars().all()}
+        assert readable_files == accessible_files
+
+
+        readable_folders = {await folder.path for folder in all_folder if await auth.can(alice, 'read', folder)}
+        assert readable_folders == {'/home/alice/Documents', '/home/alice/Desktop', '/home/alice'}
+        a_query = await auth.accessible_query(alice, select(Folder), 'read')
+        accessible_folders = {await f.path for f in (await db.execute(a_query)).scalars().all()}
+        assert readable_folders == accessible_folders
+
+
+
+
+
+
+
 

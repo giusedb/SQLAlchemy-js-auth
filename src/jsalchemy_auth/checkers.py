@@ -3,8 +3,9 @@ from typing import Set, List
 from sqlalchemy import Select, or_
 from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 
-from jsalchemy_auth.traversers import treefy_paths, tree_traverse, traverse, class_traverse, all_paths
-from jsalchemy_auth.utils import to_context, Context
+from jsalchemy_auth.traversers import treefy_paths, tree_traverse, traverse, class_traverse, all_paths, \
+    aggregate_references
+from jsalchemy_auth.utils import to_context, Context, invert_prop, ContextSet
 from .models import UserMixin
 
 class PermissionChecker:
@@ -51,33 +52,70 @@ class Path(PermissionChecker):
 
     async def joins(self, group_ids: Set[int], target: DeclarativeBase) -> List[RelationshipProperty]:
         permitted_contexts = await self.auth.contexts_by_permission(group_ids, self.permission)
+        if not permitted_contexts:
+            return [False]
         ret = []
         if permitted_contexts:
             models = {context.model for context in permitted_contexts}
             for path in all_paths(self.paths):
                 # traverse all paths to find the tables where permissions are assigned
                 partial_path = []
+                rec_join = None
                 for prop in class_traverse(target, path):
+                    if prop.target in prop.parent.tables:
+                        rec_join = partial_path.copy()
                     partial_path.append(prop)
                     if prop.entity.class_ in models:
+                        if rec_join is not None:
+                            for p in rec_join:
+                                if p not in ret:
+                                    ret.append(p)
+                            break
                         for p in partial_path:
                             if p not in ret:
                                 ret.append(p)
         return ret
 
-    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase, permission_name: str = 'read') -> List:
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase,
+                    permission_name: str = 'read') -> List:
+        # Get permitted models and their IDs
         permitted = {c.model: c.ids for c in await self.auth.contexts_by_permission(group_ids, self.permission)}
-        items = [model.id.in_(permitted[model])
-            for path in all_paths(self.paths)
-                for model in (
-                    self.auth.to_class(a.target)
-                    for a in class_traverse(target, path))
-                if model in permitted]
+
+        # Build the filter conditions
+        items = []
+
+        # Add conditions for all paths and their targets
+        for path in all_paths(self.paths):
+            overjoin = None
+            overpath = None
+            for step in class_traverse(target, path):
+                if step.target in step.parent.tables:
+                    overjoin = []
+                    overpath = []
+                if overpath is not None:
+                    overpath.append(step)
+                model = self.auth.to_class(step.target)
+                if model in permitted:
+                    if overjoin is None:
+                        items.append(ContextSet(model, permitted[model]))
+                    else:
+                        overjoin.append((overpath.copy(), permitted[model]))
+        if overjoin:
+            for path, ids in overjoin:
+                overpath = '.'.join(invert_prop(x).key for x in reversed(path))
+                model = path[-1].entity.class_
+                context = ContextSet(model, ids)
+                async for context in traverse(context, overpath):
+                    items.append(context)
+
+        # Add condition for target model itself
         if target in permitted:
-            items.append(target.id.in_(permitted[target]))
-        if items:
-            return or_(*items)
-        return None
+            items.append(ContextSet(target, permitted[target]))
+
+        contexts = aggregate_references(items)
+        if contexts:
+            return or_(*(context.model.id.in_(context.ids) for context in contexts))
+        return False
 
 class Owner(PermissionChecker):
     def __init__(self, on: str, auth: "Auth"=None):
