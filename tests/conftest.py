@@ -420,19 +420,24 @@ def filesystem(Base, User):
                 return _path()
 
 
-        tagging = Table(
-            "tagging",
+        tagging_folder = Table(
+            "tagging_folders",
+            Base.metadata,
+            Column("tag_id", Integer, ForeignKey("tags.id")),
+            Column("folder_id", Integer, ForeignKey("folders.id")),
+        )
+        tagging_file = Table(
+            "tagging_files",
             Base.metadata,
             Column("tag_id", Integer, ForeignKey("tags.id")),
             Column("file_id", Integer, ForeignKey("files.id")),
-            Column("folder_id", Integer, ForeignKey("folders.id")),
         )
 
         class Tag(Base):
             __tablename__ = "tags"
 
-            files = relationship("File", secondary=tagging, backref="tags")
-            folders = relationship("Folder", secondary=tagging, backref="tags")
+            files = relationship("File", secondary=tagging_file, backref="tags")
+            folders = relationship("Folder", secondary=tagging_folder, backref="tags")
 
         return MountPoint, Folder, File, Tag
     return wrapper
@@ -474,6 +479,7 @@ def full_filesystem(context, filesystem):
                 to_print.files.append(read_me)
                 to_print.files.append(bill)
                 ready_to_send.files.append(backup)
+                db.add_all([impoartant, to_print, ready_to_send])
 
                 db.add_all([desktop, documents, read_me, backup])
         return classes
