@@ -213,7 +213,7 @@ class Auth:
         """Return the inverted schema."""
         return inverted_properties(self.propagation_schema)
 
-    def _explode_partial_schema(self, table: str, depth: int = 0) -> Set[str]:
+    def _explode_partial_schema(self, model_name: str, depth: int = 0) -> Set[str]:
         """Traverse the schema to build all possible paths from a model class.
 
         Args:
@@ -222,28 +222,35 @@ class Auth:
 
         Returns:
             set[str]: Set of all paths derived from the schema."""
+        traversed_class = set()
 
         def tree_explore(node: str) -> Set[str]:
             """
             Return all dotted paths that can be formed from ``node`` by following the
             relations defined in ``schema``.
             """
-            nonlocal schema, mappers
+            nonlocal schema, mappers, traversed_class
             if node not in schema:
                 return set()
+            if node in traversed_class:
+                return set()
+            traversed_class.add(node)
 
             paths: Set[str] = set()
             for child in schema[node]:
                 # the direct edge
                 paths.add(child)
                 child_class = mappers[node].relationships[child].entity.class_.__name__
+                if child_class in traversed_class:
+                    continue
+                # traversed_class.add(child_class)
                 # recursively extend from the child
                 paths.update({f"{child}.{sub}" for sub in tree_explore(child_class)})
 
             return paths
         mappers = {m.class_.__name__: m for m in self.base_class.registry.mappers}
         schema = self.inv_propagation_schema
-        return tree_explore(table)
+        return tree_explore(model_name)
 
     async def set_permission_global(self, is_global: bool, *permission_name: List[str]):
         """Set a permission to be global."""
