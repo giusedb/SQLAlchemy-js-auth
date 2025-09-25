@@ -86,8 +86,7 @@ class PermissionChecker:
         """
         raise NotImplementedError
 
-    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase,
-                    permission_name: str = 'read') -> List:
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase) -> List:
         """
         Generate WHERE clause conditions for checking permissions.
 
@@ -191,8 +190,7 @@ class Path(PermissionChecker):
                                 ret.append(p)
         return ret
 
-    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase,
-                    permission_name: str = 'read') -> List:
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase) -> List:
         """
         Generate WHERE clause conditions for path-based permission checking.
 
@@ -315,8 +313,7 @@ class Owner(PermissionChecker):
         """
         return attribute == user.id
 
-    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase,
-                    permission_name: str = 'read') -> List:
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase) -> List:
         """
         Generate WHERE clause conditions for owner-based permission checking.
 
@@ -437,20 +434,23 @@ class Global(PermissionChecker):
                 return True
         return False
 
-    async def joins(self, user: UserMixin, query: Select):
+    async def joins(self, group_ids: Set[int], target: DeclarativeBase) -> List[RelationshipProperty]:
         """
         Generate joins needed for global permission checking.
 
         Args:
-            user: The user to check permissions for
+            group_ids: The group ids that user is member of
             query: The SQL query to generate joins for
 
         Returns:
             List: List containing None (no joins needed)
         """
-        return [None]
+        role_ids = await self.auth._resolve_permission(self.permission)
+        if await self(None, group_ids, role_ids, target):
+            return [True]
+        return []
 
-    def where(self, user: UserMixin, query: Select, permission_name: str = 'read'):
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase):
         """
         Generate WHERE clause conditions for global permission checking.
 
@@ -532,6 +532,17 @@ class Or(PermissionChecker):
             List[RelationshipProperty]: List of relationship properties to join
         """
         return [prop for checker in self.checkers for prop in await checker.joins(user, target)]
+
+    async def where(self, user: UserMixin, group_ids: Set[int], target: DeclarativeBase) -> List:
+        conditions = [await checker.where(user, group_ids, target) for checker in self.checkers]
+        conditions = [cond for cond in conditions if cond is not None]
+        if any(condition is True for condition in conditions):
+            return True
+        if len(conditions) == 1:
+            return conditions[0]
+        if len(conditions) > 1:
+            return or_(*conditions)
+        return []
 
 
 class And(PermissionChecker):
