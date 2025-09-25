@@ -269,3 +269,12 @@ def invert_prop(prop: RelationshipProperty):
         return prop.entity.relationships[prop.back_populates]
     if isinstance(prop.backref, str):
         return prop.entity.relationships[prop.backref]
+
+
+def clean_prefix(items: List[str]):
+    """Remove all items that are prefixes of other items."""
+    ret = set()
+    for item in sorted(items, key=len, reverse=True):
+        if not any(prefix.startswith(item) for prefix in ret):
+            ret.add(item)
+    return ret

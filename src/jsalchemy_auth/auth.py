@@ -1,17 +1,16 @@
-from collections import namedtuple
 from functools import reduce, partial
 from itertools import groupby
 from operator import itemgetter
-from typing import Type, Dict, List, Any, Optional, Union, Set, NamedTuple
+from typing import Type, Dict, List, Any, Optional, Set
+
+from sqlalchemy import Integer, select, Select
+from sqlalchemy.orm import mapped_column, DeclarativeBase
 
 from jsalchemy_web_context import db as session
-from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
-from sqlalchemy import String, Boolean, Integer, ForeignKey, Table, Column, select, update, Select
-
 from jsalchemy_web_context.cache import redis_cache, request_cache
-from .utils import Context, to_context, inverted_properties, ContextSet, table_to_class, get_target_table
-from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
 from .checkers import Path, Global
+from .models import UserMixin, UserGroupMixin, RoleMixin, PermissionMixin, define_tables
+from .utils import Context, to_context, inverted_properties, ContextSet, table_to_class, get_target_table, clean_prefix
 
 
 class PermissionGrantError(Exception):
@@ -222,35 +221,51 @@ class Auth:
 
         Returns:
             set[str]: Set of all paths derived from the schema."""
-        traversed_class = set()
+        def explore_recursive(current_node: str, current_path: str, used_edges: set) -> List[str]:
+            """Recursively explore all paths from current node"""
+            # If node doesn't exist in schema, return current path
+            if current_node not in schema:
+                return [current_path] if current_path else []
 
-        def tree_explore(node: str) -> Set[str]:
-            """
-            Return all dotted paths that can be formed from ``node`` by following the
-            relations defined in ``schema``.
-            """
-            nonlocal schema, mappers, traversed_class
-            if node not in schema:
-                return set()
-            if node in traversed_class:
-                return set()
-            traversed_class.add(node)
+            relationships = schema[current_node]
+            all_paths = []
 
-            paths: Set[str] = set()
-            for child in schema[node]:
-                # the direct edge
-                paths.add(child)
-                child_class = mappers[node].relationships[child].entity.class_.__name__
-                if child_class in traversed_class:
+            for field_name, target_node in relationships:
+                # Create edge identifier: (source_node, field_name, target_node)
+                edge = (current_node, field_name, target_node)
+
+                # Skip if this edge has already been used in current path
+                if edge in used_edges:
                     continue
-                # traversed_class.add(child_class)
-                # recursively extend from the child
-                paths.update({f"{child}.{sub}" for sub in tree_explore(child_class)})
 
-            return paths
+                # Build the path segment
+                new_path = f"{current_path}.{field_name}" if current_path else field_name
+
+                # Create new set of used edges for this path
+                new_used_edges = used_edges.copy()
+                new_used_edges.add(edge)
+
+                # If target node exists in schema, continue exploring
+                if target_node in schema:
+                    sub_paths = explore_recursive(target_node, new_path, new_used_edges)
+                    all_paths.extend(sub_paths)
+                else:
+                    # Target node not in schema, this is a terminal path
+                    all_paths.append(new_path)
+
+            return all_paths
+
+
         mappers = {m.class_.__name__: m for m in self.base_class.registry.mappers}
-        schema = self.inv_propagation_schema
-        return tree_explore(model_name)
+        schema = {class_name: {(attr, mappers[class_name].mapper.relationships[attr].entity.class_.__name__)
+                               for attr in attrs}
+                  for class_name, attrs in self.inv_propagation_schema.items()}
+        # Handle edge case where starting node doesn't exist
+        if model_name not in schema:
+            return set()
+
+        all_paths = explore_recursive(model_name, "", set())
+        return clean_prefix(all_paths)
 
     async def set_permission_global(self, is_global: bool, *permission_name: List[str]):
         """Set a permission to be global."""
