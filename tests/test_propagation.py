@@ -55,13 +55,11 @@ def test_explode_partial_schema(Person, Base):
     auth = Auth(Base, propagation_schema=schema)
 
     inv_paths = auth._explode_partial_schema('Person')
-    assert inv_paths == {'job', 'hobby', 'city', 'city.department', 'city.department.country'}
+    assert inv_paths == {'city.department.country', 'hobby', 'job'}
 
-    assert auth._explode_partial_schema('City') == {
-        'department', 'department.country'}
+    assert auth._explode_partial_schema('City') == {'department.country'}
 
-    assert auth._explode_partial_schema('Department') == {
-        'country'}
+    assert auth._explode_partial_schema('Department') == {'country'}
 
     assert auth._explode_partial_schema('Country') == set()
 
@@ -285,5 +283,37 @@ async def test_propagation(context, spatial, db_engine, User, Base, Person, full
         await auth.grant(bob, 'reader', football)
         bobs_people = {person.name for person in all_people if await auth.can(bob, 'read', person)}
         assert bobs_people == {'John', 'Jane', 'Joe'}
+
+@pytest.mark.asyncio
+async def test_propagation_with_hierarchy(Base, full_filesystem, User, db_engine, context):
+    build_classes, put_data = full_filesystem
+
+    auth = Auth(Base, user_model=User)
+
+    classes = build_classes()
+
+    auth.propagation_schema = {
+        'MountPoint': ['folders'],
+        'Folder': ['files', 'children'],
+        'Tag': ['folders', 'mountpoints']
+    }
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    MountPoint, Folder, File, Tag = await put_data(classes)
+
+    mp_path = auth._explode_partial_schema('MountPoint')
+    file_path = auth._explode_partial_schema('File')
+    folder_path = auth._explode_partial_schema('Folder')
+
+
+    assert mp_path == {'tags'}
+    assert folder_path == {'parent.tags', 'tags', 'parent.mountpoint.tags', 'mountpoint.tags'}
+    assert file_path == {'folder.mountpoint.tags', 'folder.parent.tags', 'folder.parent.mountpoint.tags', 'folder.tags'}
+    assert mp_path.issubset(folder_path)
+
+
+
 
 

@@ -432,12 +432,19 @@ def filesystem(Base, User):
             Column("tag_id", Integer, ForeignKey("tags.id")),
             Column("file_id", Integer, ForeignKey("files.id")),
         )
+        tagging_mountpoint = Table(
+            "tagging_mountpoints",
+            Base.metadata,
+            Column("tag_id", Integer, ForeignKey("tags.id")),
+            Column("mountpoint_id", Integer, ForeignKey("mountpoints.id")),
+        )
 
         class Tag(Base):
             __tablename__ = "tags"
 
             files = relationship("File", secondary=tagging_file, backref="tags")
             folders = relationship("Folder", secondary=tagging_folder, backref="tags")
+            mountpoints = relationship("MountPoint", secondary=tagging_mountpoint, backref="tags")
 
         return MountPoint, Folder, File, Tag
     return wrapper
@@ -451,7 +458,8 @@ def full_filesystem(context, filesystem):
 
         async with context():
             root = MountPoint(name="root")
-            nfs = Folder(name="nfs", mountpoint=root)
+            nfs = MountPoint(name="nfs")
+            nfs = Folder(name="nfs", mountpoint=nfs)
 
             root_folder = Folder(name="", mountpoint=root, owner_id=3, group_id=3)
             dev = Folder(name="dev", parent=root_folder, owner_id=3, group_id=3)

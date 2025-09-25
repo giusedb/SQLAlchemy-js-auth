@@ -434,11 +434,90 @@ async def test_accessible_query_inverted(Base, full_filesystem, User, db_engine,
         assert alice_read_tags == {t.name for t in (await db.execute(alice_accessible_tags)).scalars()}
         assert bob_read_tags == {t.name for t in (await db.execute(bob_accessible_tags)).scalars()}
 
+        query = select(Folder.name, File.name).outerjoin(Folder.files)
+        with pytest.raises(ValueError):
+            a_query = await auth.accessible_query(alice, query, 'read')
+
+        query = select(File.name).where(File.name.startswith('b'))
+        a_query = await auth.accessible_query(alice, query, 'read')
+        accessible_files = {f for f in (await db.execute(a_query)).scalars()}
 
 
+@pytest.mark.asyncio
+async def test_complex_schema(Base, full_filesystem, User, db_engine, context):
 
+    build_classes, put_data = full_filesystem
 
+    auth = Auth(Base, user_model=User)
 
+    classes = build_classes()
 
+    auth.propagation_schema = {
+        'MountPoint': ['folders'],
+        'Folder': ['files', 'children'],
+    }
 
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    MountPoint, Folder, File, Tag = await put_data(classes)
+
+    async with context():
+        alice = User(name='alice', last_name='A', id=1)
+        bob = User(name='bob', last_name='B', id=2)
+        root = User(name='root', last_name='C', id=3)
+
+        db.add_all([alice, bob, root])
+
+    async with context():
+        await auth.assign('reader', 'read')
+        await auth.assign('editor', 'read', 'write')
+        await auth.assign('manager', 'read', 'write', 'traverse')
+
+        alice = await User.get_by_name('alice')
+        bob = await User.get_by_name('bob')
+        root = await User.get_by_name('root')
+
+        users = {user.name: user for user in (alice, bob, root)}
+
+        home = await Folder.get_by_name('home')
+        for home in await home.awaitable_attrs.children:
+            await auth.grant(users[home.name], 'manager', home)
+
+        await auth.grant(root, 'manager', GLOBAL_CONTEXT)
+
+        all_folders = (await db.execute(select(Folder))).scalars().all()
+        all_files = (await db.execute(select(File))).scalars().all()
+        all_tags = (await db.execute(select(Tag))).scalars().all()
+        all_mount_points = (await db.execute(select(MountPoint))).scalars().all()
+        folder_query = select(Folder)
+
+        alices_read_folders = {await f.path for f in all_folders if await auth.can(alice, 'read', f)}
+        bob_read_folders = {await f.path for f in all_folders if await auth.can(bob, 'read', f)}
+
+        a_query = await auth.accessible_query(alice, folder_query, 'read')
+        b_query = await auth.accessible_query(bob, folder_query, 'read')
+
+        alice_accessible_folders = {await f.path for f in (await db.execute(a_query)).scalars()}
+        bob_accessible_folders = {await f.path for f in (await db.execute(b_query)).scalars()}
+
+        assert alices_read_folders == alice_accessible_folders
+        assert bob_read_folders == bob_accessible_folders
+
+        assert alice_accessible_folders == {'/home/alice', '/home/alice/Desktop', '/home/alice/Documents'}
+        assert bob_accessible_folders == {'/home/bob/Desktop', '/home/bob/Documents', '/home/bob'}
+
+        await auth.grant(bob, 'manager', await MountPoint.get_by_name('root'))
+
+        alices_read_folders = {await f.path for f in all_folders if await auth.can(alice, 'read', f)}
+        bob_read_folders = {await f.path for f in all_folders if await auth.can(bob, 'read', f)}
+
+        a_query = await auth.accessible_query(alice, folder_query, 'traverse')
+        b_query = await auth.accessible_query(bob, folder_query, 'traverse')
+
+        alice_accessible_folders = {await f.path for f in (await db.execute(a_query)).scalars()}
+        bob_accessible_folders = {await f.path for f in (await db.execute(b_query)).scalars()}
+
+        assert alices_read_folders == alice_accessible_folders
+        assert bob_read_folders == bob_accessible_folders
 
